@@ -1,0 +1,24 @@
+{
+  "name": "facebook-scraper",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Facebook scraper usando Playwright con Chrome real",
+  "type": "module",
+  "main": "index.mjs",
+  "scripts": {
+    "start": "node index.mjs",
+    "chrome": "node index.mjs chrome",
+    "edge": "node index.mjs edge",
+    "firefox": "node index.mjs firefox",
+    "public": "node publicacion/public.mjs",
+    "public:chrome": "node publicacion/public.mjs chrome",
+    "public:edge": "node publicacion/public.mjs edge"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.26.1",
+  "dependencies": {
+    "playwright": "^1.61.1"
+  }
+}
