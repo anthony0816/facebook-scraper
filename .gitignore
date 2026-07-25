@@ -1,3 +1,6 @@
 node_modules/
 .env
 *.png
+visited.json
+collected_groups.json
+/z_folder

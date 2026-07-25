@@ -2,6 +2,7 @@ import { getDriver } from '../drivers/index.mjs';
 import { grups_urls } from './grups_urls/grups.mjs';
 import { message } from './message/message.mjs';
 import { params } from './public_params.mjs';
+import { isVisited, markVisited, clearVisited } from './groupTrace.mjs';
 import { readdirSync } from 'fs';
 import { join, extname } from 'path';
 import { fileURLToPath } from 'url';
@@ -193,8 +194,17 @@ async function main() {
     const url = grups_urls[i].trim();
     if (!url) continue;
 
+    if (isVisited(url)) {
+      console.log(`\n--- Grupo ${i + 1}/${grups_urls.length} --- ⏭️ Ya publicado`);
+      continue;
+    }
+
     console.log(`\n--- Grupo ${i + 1}/${grups_urls.length} ---`);
-    await postToGroup(page, url);
+    const success = await postToGroup(page, url);
+
+    if (success) {
+      markVisited(url);
+    }
 
     if (i < grups_urls.length - 1) {
       const delay = randomBetween(params.POST_INTERVAL_MIN, params.POST_INTERVAL_MAX);

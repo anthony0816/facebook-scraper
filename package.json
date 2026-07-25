@@ -12,7 +12,11 @@
     "firefox": "node index.mjs firefox",
     "public": "node publicacion/public.mjs",
     "public:chrome": "node publicacion/public.mjs chrome",
-    "public:edge": "node publicacion/public.mjs edge"
+    "public:edge": "node publicacion/public.mjs edge",
+    "status:count": "node publicacion/status.mjs count",
+    "status:dedup": "node publicacion/status.mjs dedup",
+    "collect": "node publicacion/collectUrls.mjs",
+    "collect:edge": "node publicacion/collectUrls.mjs edge"
   },
   "keywords": [],
   "author": "",
