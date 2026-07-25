@@ -21,7 +21,7 @@ function sleep(ms) {
   return new Promise(r => setTimeout(r, ms));
 }
 
-async function waitForElement(page, selector, maxRetries = 15, delay = 1000) {
+async function waitForElement(page, selector, maxRetries = params.MAX_TEXT_EDITOR_FINDER_SECONDS_AWAIT, delay = 1000) {
   console.log('awaiting for the element ' +  maxRetries )
   const el = await page.$(selector);
   if (el) return el;
@@ -40,9 +40,21 @@ function getAllImages() {
   return getImages();
 }
 
+async function goto(page, url, retries = params.MAX_NAVEGATION_RETRIES, timeout = 240000 ) {
+  try{
+    await page.goto(url,  { waitUntil: 'load', timeout })
+  } catch(err){
+    console.error('Navegation Fails:',err.message )
+    console.log('retrying:', retries)
+    if(retries < 0 ) return console.log('max retries exeded')
+    await goto(page, url, retries - 1, timeout )
+  }
+}
+
 async function postToGroup(page, url) {
   console.log(`  Navegando a: ${url}`);
-  await page.goto(url, { waitUntil: 'load', timeout: 60000 });
+  // await page.goto(url, { waitUntil: 'load', timeout: 600000 });
+  await goto(page, url)
   console.log('Loaded ✅')
 
   const crearBtnSelectors = [
@@ -66,6 +78,7 @@ async function postToGroup(page, url) {
 
   if (!clicked) {
     console.log(`  ⚠️ No se encontró botón "Escribe algo", buscando otro selector...`);
+    
     const fallbackSelectors = [
       'div[role="button"]:has-text("Crear")',
       'div[role="button"]:has-text("publicación")',
@@ -78,12 +91,13 @@ async function postToGroup(page, url) {
         break;
       }
     }
+
+    return {error : 'not_public_button_found'}
   }
 
   const lexicalEditor = await waitForElement(
     page,
-    'div[role="dialog"] div[contenteditable="true"][data-lexical-editor="true"]',
-    15
+    'div[role="dialog"] div[contenteditable="true"][data-lexical-editor="true"]'
   );
   if (!lexicalEditor) {
     console.log(`  ❌ No se pudo encontrar el editor de texto`);
@@ -203,9 +217,9 @@ async function main() {
     if (isVisited(url, (row)=> {
       if (!row.error) return true
       if (
-        // row.error == 'not_public_button_found' 
+        row.error == 'not_public_button_found' 
         // || 
-        row.error == 'no_text_editor_found'
+        // row.error == 'no_text_editor_found'
       ){
         withError =  row.error
         return true
