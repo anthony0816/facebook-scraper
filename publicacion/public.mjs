@@ -21,6 +21,15 @@ function sleep(ms) {
   return new Promise(r => setTimeout(r, ms));
 }
 
+async function waitForElement(page, selector, maxRetries = 15, delay = 1000) {
+  console.log('awaiting for the element ' +  maxRetries )
+  const el = await page.$(selector);
+  if (el) return el;
+  if (maxRetries <= 0) return null;
+  await sleep(delay);
+  return waitForElement(page, selector, maxRetries - 1, delay);
+}
+
 function getImages() {
   return readdirSync(imgsDir)
     .filter(f => /\.(jpe?g|png|gif|webp)$/i.test(f))
@@ -35,7 +44,6 @@ async function postToGroup(page, url) {
   console.log(`  Navegando a: ${url}`);
   await page.goto(url, { waitUntil: 'load', timeout: 60000 });
   console.log('Loaded ✅')
-  await sleep(params.WAIT_AFTER_NAVIGATION);
 
   const crearBtnSelectors = [
     'div[role="button"]:has-text("Escribe algo")',
@@ -72,9 +80,11 @@ async function postToGroup(page, url) {
     }
   }
 
-  await sleep(params.WAIT_FOR_COMPOSER);
-
-  const lexicalEditor = await page.$('div[role="dialog"] div[contenteditable="true"][data-lexical-editor="true"]');
+  const lexicalEditor = await waitForElement(
+    page,
+    'div[role="dialog"] div[contenteditable="true"][data-lexical-editor="true"]',
+    15
+  );
   if (!lexicalEditor) {
     console.log(`  ❌ No se pudo encontrar el editor de texto`);
     return {error : 'no_text_editor_found'};
@@ -85,8 +95,6 @@ async function postToGroup(page, url) {
   await sleep(1500);
 
   await page.keyboard.type(message, { delay: 10 });
-
-  await sleep(params.WAIT_AFTER_TYPING);
 
   const textContent = await page.evaluate(() => {
     const spans = document.querySelectorAll('span[data-lexical-text="true"]');
@@ -147,8 +155,6 @@ async function postToGroup(page, url) {
     console.log(`  ⚠️ No hay imágenes en la carpeta imgs/`);
   }
 
-  await sleep(3000);
-
   const postBtnSelectors = [
     'div[role="dialog"] div[aria-label="Publicar"]',
     'div[role="dialog"] div[aria-label="Post"]',
@@ -177,7 +183,6 @@ async function postToGroup(page, url) {
     return {error  : 'not_public_button_found'};
   }
 
-  await sleep(params.WAIT_AFTER_POST_CLICK);
   return {success : true};
 }
 
