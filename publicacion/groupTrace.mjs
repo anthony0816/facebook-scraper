@@ -14,9 +14,11 @@ function writeTrace(data) {
   writeFileSync(TRACE_FILE, JSON.stringify(data, null, 2), 'utf-8');
 }
 
-export function isVisited(url) {
+export function isVisited(url, condition=undefined) {
   const trace = readTrace();
-  return url in trace;
+  const row = trace[url]
+  if(condition) return url in trace && condition(row)
+  return url in trace
 }
 
 export function markVisited(url) {
@@ -24,6 +26,16 @@ export function markVisited(url) {
   trace[url] = {
     publishedAt: new Date().toISOString(),
     status: 'success',
+  };
+  writeTrace(trace);
+}
+
+export function markVisitedOnError(url, error) {
+  const trace = readTrace();
+  trace[url] = {
+    publishedAt: new Date().toISOString(),
+    status: 'error',
+    error
   };
   writeTrace(trace);
 }

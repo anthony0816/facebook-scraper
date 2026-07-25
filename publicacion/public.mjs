@@ -2,7 +2,7 @@ import { getDriver } from '../drivers/index.mjs';
 import { grups_urls } from './grups_urls/grups.mjs';
 import { message } from './message/message.mjs';
 import { params } from './public_params.mjs';
-import { isVisited, markVisited, clearVisited } from './groupTrace.mjs';
+import { isVisited, markVisited, markVisitedOnError } from './groupTrace.mjs';
 import { readdirSync } from 'fs';
 import { join, extname } from 'path';
 import { fileURLToPath } from 'url';
@@ -77,7 +77,7 @@ async function postToGroup(page, url) {
   const lexicalEditor = await page.$('div[role="dialog"] div[contenteditable="true"][data-lexical-editor="true"]');
   if (!lexicalEditor) {
     console.log(`  ❌ No se pudo encontrar el editor de texto`);
-    return false;
+    return {error : 'no_text_editor_found'};
   }
 
   console.log(`  Escribiendo mensaje...`);
@@ -174,11 +174,11 @@ async function postToGroup(page, url) {
 
   if (!posted) {
     console.log(`  ⚠️ No se encontró botón de publicar`);
-    return false;
+    return {error  : 'not_public_button_found'};
   }
 
   await sleep(params.WAIT_AFTER_POST_CLICK);
-  return true;
+  return {success : true};
 }
 
 async function main() {
@@ -194,16 +194,24 @@ async function main() {
     const url = grups_urls[i].trim();
     if (!url) continue;
 
-    if (isVisited(url)) {
+    if (isVisited(url, (row)=> {
+      if (!row.error) return true
+      return row.error == 'not_public_button_found' || row.error == 'no_text_editor_found'
+    })) {
       console.log(`\n--- Grupo ${i + 1}/${grups_urls.length} --- ⏭️ Ya publicado`);
       continue;
     }
 
     console.log(`\n--- Grupo ${i + 1}/${grups_urls.length} ---`);
-    const success = await postToGroup(page, url);
+    const {success, error} = await postToGroup(page, url);
 
     if (success) {
       markVisited(url);
+    }
+    if(error){
+      if(error == 'not_public_button_found')  markVisitedOnError(url, error)
+      if(error == 'no_text_editor_found') markVisitedOnError(url, error)
+      
     }
 
     if (i < grups_urls.length - 1) {
