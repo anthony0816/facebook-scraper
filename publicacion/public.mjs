@@ -194,11 +194,15 @@ async function main() {
     const url = grups_urls[i].trim();
     if (!url) continue;
 
+    let withError = ''
     if (isVisited(url, (row)=> {
       if (!row.error) return true
-      return row.error == 'not_public_button_found' || row.error == 'no_text_editor_found'
+      if (row.error == 'not_public_button_found' || row.error == 'no_text_editor_found'){
+        withError =  row.error
+        return true
+      }
     })) {
-      console.log(`\n--- Grupo ${i + 1}/${grups_urls.length} --- ⏭️ Ya publicado`);
+      console.log(`\n--- Grupo ${i + 1}/${grups_urls.length} --- ⏭️ Ya publicado${withError !== '' ? ` ,❌ con error : ${withError}, url: ${url}` : '' }`);
       continue;
     }
 
