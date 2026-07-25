@@ -29,10 +29,9 @@ function normalizeUrl(url) {
 async function count() {
   const groups = await getTotalGroups();
   const visited = readVisited();
-  const published = groups.filter(url => url in visited);
+  const published = groups.filter(url => url in visited );
   const pct = groups.length ? ((published.length / groups.length) * 100).toFixed(1) : '0';
 
-  console.log(`Publicados: ${published.length}/${groups.length} (${pct}%)`);
   if (published.length > 0) {
     console.log('\n✔️  Ya publicados:');
     published.forEach(u => console.log(`  ${u}`));
@@ -41,6 +40,7 @@ async function count() {
     console.log('\n⏳ Pendientes:');
     groups.filter(u => !(u in visited)).forEach(u => console.log(`  ${u}`));
   }
+  console.log(`✅ Publicados: ${published.length}/${groups.length} (${pct}%)`);
 }
 
 async function dedup() {

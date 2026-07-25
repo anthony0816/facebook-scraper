@@ -197,7 +197,11 @@ async function main() {
     let withError = ''
     if (isVisited(url, (row)=> {
       if (!row.error) return true
-      if (row.error == 'not_public_button_found' || row.error == 'no_text_editor_found'){
+      if (
+        // row.error == 'not_public_button_found' 
+        // || 
+        row.error == 'no_text_editor_found'
+      ){
         withError =  row.error
         return true
       }
