@@ -26,10 +26,8 @@ function getImages() {
     .map(f => join(imgsDir, f));
 }
 
-function getRandomImagePath() {
-  const images = getImages();
-  if (images.length === 0) return null;
-  return images[Math.floor(Math.random() * images.length)];
+function getAllImages() {
+  return getImages();
 }
 
 async function postToGroup(page, url) {
@@ -38,114 +36,121 @@ async function postToGroup(page, url) {
   console.log('Loaded ✅')
   await sleep(params.WAIT_AFTER_NAVIGATION);
 
-  const composerSelectors = [
-    'div[role="textbox"]',
-    'div[contenteditable="true"]',
-    'div[aria-label*="What\'s on your mind"]',
-    'div[aria-label*="Escribe"]',
-    'div[aria-label*="publicación"]',
-    'form [contenteditable="true"]',
+  const crearBtnSelectors = [
+    'div[role="button"]:has-text("Escribe algo")',
+    'div[role="button"]:has-text("Escribe")',
+    'div[role="button"]:has-text("Write something")',
+    'div[role="button"]:has-text("Write")',
+    'div[role="button"]:has-text("Crear publicación")',
   ];
 
-  let composer = null;
-  for (const sel of composerSelectors) {
-    composer = await page.$(sel);
-    if (composer) break;
+  let clicked = false;
+  for (const sel of crearBtnSelectors) {
+    const btn = await page.$(sel);
+    if (btn) {
+      console.log(`  Haciendo clic en botón de creación...`);
+      await btn.click();
+      clicked = true;
+      break;
+    }
   }
 
-  if (!composer) {
-    console.log(`  ⚠️ No se encontró el composer, intentando hacer clic en el área de publicación...`);
-
-    const clickSelectors = [
-      'div[role="button"]:has-text("Write")',
-      'div[role="button"]:has-text("Escribe")',
+  if (!clicked) {
+    console.log(`  ⚠️ No se encontró botón "Escribe algo", buscando otro selector...`);
+    const fallbackSelectors = [
       'div[role="button"]:has-text("Crear")',
       'div[role="button"]:has-text("publicación")',
       'form[method="POST"] div[role="button"]',
     ];
-
-    for (const sel of clickSelectors) {
-      const el = await page.$(sel);
-      if (el) {
-        await el.click();
-        await sleep(params.WAIT_FOR_COMPOSER);
+    for (const sel of fallbackSelectors) {
+      const btn = await page.$(sel);
+      if (btn) {
+        await btn.click();
         break;
       }
     }
-
-    for (const sel of composerSelectors) {
-      composer = await page.$(sel);
-      if (composer) break;
-    }
   }
 
-  if (!composer) {
+  await sleep(params.WAIT_FOR_COMPOSER);
+
+  const lexicalEditor = await page.$('div[role="dialog"] div[contenteditable="true"][data-lexical-editor="true"]');
+  if (!lexicalEditor) {
     console.log(`  ❌ No se pudo encontrar el editor de texto`);
     return false;
   }
 
   console.log(`  Escribiendo mensaje...`);
-  await composer.click();
-  await sleep(1000);
-  await composer.fill(message);
+  await lexicalEditor.click();
+  await sleep(1500);
+
+  await page.keyboard.type(message, { delay: 10 });
+
   await sleep(params.WAIT_AFTER_TYPING);
 
-  const imagePath = getRandomImagePath();
-  if (imagePath) {
-    console.log(`  Subiendo imagen: ${imagePath}`);
+  const textContent = await page.evaluate(() => {
+    const spans = document.querySelectorAll('span[data-lexical-text="true"]');
+    return Array.from(spans).map(s => s.textContent).join('');
+  });
+  console.log(`  Texto detectado: "${textContent.substring(0, 50)}..."`);
 
-    const fileInputSelectors = [
-      'input[type="file"][accept*="image"]',
-      'input[type="file"]',
-      'form input[type="file"]',
+  const images = getAllImages();
+  if (images.length > 0) {
+    console.log(`  Subiendo ${images.length} imágenes...`);
+
+    const photoBtnSelectors = [
+      'div[aria-label="Foto/video"]',
+      'div[aria-label="Photo/video"]',
+      'div[role="button"]:has-text("Foto")',
+      'div[role="button"]:has-text("Photo")',
+      'div[aria-label="Añade a tu publicación"] div[role="button"]',
+      'div[aria-label="Add to your post"] div[role="button"]',
+      'div[role="button"]:has-text("video")',
     ];
 
-    let fileInput = null;
-    for (const sel of fileInputSelectors) {
-      fileInput = await page.$(sel);
-      if (fileInput) break;
+    let uploaded = false;
+    for (const sel of photoBtnSelectors) {
+      const btn = await page.$(sel);
+      if (btn) {
+        console.log(`  Haciendo clic en botón de foto...`);
+        await btn.click();
+        await sleep(2000);
+
+        const [fileChooser] = await Promise.all([
+          page.waitForEvent('filechooser', { timeout: 5000 }).catch(() => null),
+        ]);
+
+        if (fileChooser) {
+          await fileChooser.setFiles(images);
+          console.log(`  ${images.length} imágenes seleccionadas, esperando subida...`);
+          await sleep(params.WAIT_FOR_IMAGES_UPLOAD);
+          uploaded = true;
+        }
+        if (uploaded) break;
+      }
     }
 
-    if (fileInput) {
-      await fileInput.setInputFiles(imagePath);
-      console.log(`  Esperando subida de imagen...`);
-      await sleep(params.WAIT_FOR_IMAGES_UPLOAD);
-    } else {
-      console.log(`  ⚠️ No se encontró input de archivo, intentando clic en botón de fotos...`);
-
-      const photoBtnSelectors = [
-        'div[aria-label="Foto"]',
-        'div[aria-label*="photo"]',
-        'div[aria-label*="foto"]',
-        'div[aria-label*="imagen"]',
-        'div[role="button"]:has-text("Foto")',
-        'div[role="button"]:has-text("Add")',
-      ];
-
-      for (const sel of photoBtnSelectors) {
-        const btn = await page.$(sel);
-        if (btn) {
-          await btn.click();
-          await sleep(2000);
-
-          const [fileChooser] = await Promise.all([
-            page.waitForEvent('filechooser', { timeout: 5000 }).catch(() => null),
-          ]);
-
-          if (fileChooser) {
-            await fileChooser.setFiles(imagePath);
-            console.log(`  Imagen seleccionada, esperando subida...`);
-            await sleep(params.WAIT_FOR_IMAGES_UPLOAD);
-          }
-          break;
-        }
+    if (!uploaded) {
+      const modalFileInput = await page.$('div[role="dialog"] input[type="file"]');
+      if (modalFileInput) {
+        await modalFileInput.setInputFiles(images);
+        console.log(`  ${images.length} imágenes subidas por input directo, esperando...`);
+        await sleep(params.WAIT_FOR_IMAGES_UPLOAD);
+        uploaded = true;
       }
+    }
+
+    if (!uploaded) {
+      console.log(`  ⚠️ No se pudieron subir las imágenes`);
     }
   } else {
     console.log(`  ⚠️ No hay imágenes en la carpeta imgs/`);
   }
 
+  await sleep(3000);
+
   const postBtnSelectors = [
+    'div[role="dialog"] div[aria-label="Publicar"]',
+    'div[role="dialog"] div[aria-label="Post"]',
     'div[aria-label="Publicar"]',
     'div[aria-label="Post"]',
     'div[role="button"]:has-text("Publicar")',
@@ -158,7 +163,7 @@ async function postToGroup(page, url) {
   let posted = false;
   for (const sel of postBtnSelectors) {
     const btn = await page.$(sel);
-    if (btn) {
+    if (btn && await btn.isVisible()) {
       await btn.click();
       console.log(`  ✅ Publicado en: ${url}`);
       posted = true;
@@ -198,9 +203,7 @@ async function main() {
     }
   }
 
-  console.log(`\n[4/4] Proceso finalizado. Cerrando...`);
-  await page.close();
-  await context.close();
+  console.log(`\n[4/4] Proceso finalizado. El navegador queda abierto.`);
 }
 
 main().catch(err => {
