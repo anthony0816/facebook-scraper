@@ -16,21 +16,45 @@ function sleep(ms) {
 async function extractUrls(page) {
   return page.evaluate(() => {
     const links = document.querySelectorAll('a[href*="/groups/"]');
-    const seen = new Set();
-    const result = [];
+    const groups = new Map();
+
     for (const link of links) {
       const href = link.getAttribute('href');
       if (!href) continue;
       const match = href.match(/\/groups\/(\d+)/);
-      if (match) {
-        const full = `https://www.facebook.com/groups/${match[1]}`;
-        if (!seen.has(full)) {
-          seen.add(full);
-          result.push(full);
+      if (!match) continue;
+      const full = `https://www.facebook.com/groups/${match[1]}`;
+      const text = link.textContent.trim();
+
+      if (text && !/^\d+$/.test(text)) {
+        const clean = text.replace(/Activo por última vez.*/i, '').trim();
+        const existing = groups.get(full);
+        if (!existing || /^\d+$/.test(existing)) {
+          groups.set(full, clean);
+        }
+      } else if (!groups.has(full)) {
+        groups.set(full, match[1]);
+      }
+    }
+
+    for (const [url, name] of groups) {
+      if (/^\d+$/.test(name)) {
+        const path = url.replace('https://www.facebook.com', '');
+        const link = document.querySelector(`a[href="${path}"]`);
+        if (link) {
+          const card = link.closest('div.x1jx94hy, div[role="article"], div.x9f619');
+          if (card) {
+            const nameSpan = card.querySelector('span.x193iq5w span.x193iq5w, [role="heading"]');
+            if (nameSpan) {
+              const t = nameSpan.textContent.trim().replace(/Activo por última vez.*/i, '').trim();
+              if (t) groups.set(url, t);
+            }
+          }
         }
       }
     }
-    return result;
+
+    return Array.from(groups.entries()).map(([url, name]) => ({ url, name }));
   });
 }
 

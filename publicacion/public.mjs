@@ -3,9 +3,9 @@ import { grups_urls } from './grups_urls/grups.mjs';
 import { message } from './message/message.mjs';
 import { params } from './public_params.mjs';
 import { isVisited, markVisited, markVisitedOnError } from './groupTrace.mjs';
-import { readdirSync } from 'fs';
-import { join, extname } from 'path';
+import { sleep, randomBetween, waitForElement, getAllImages, goto } from './utils.mjs';
 import { fileURLToPath } from 'url';
+import { join } from 'path';
 
 const browserName = process.argv[2] || 'chrome';
 const driver = getDriver(browserName);
@@ -13,48 +13,10 @@ const driver = getDriver(browserName);
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const imgsDir = join(__dirname, 'imgs');
 
-function randomBetween(min, max) {
-  return Math.floor(Math.random() * (max - min + 1)) + min;
-}
-
-function sleep(ms) {
-  return new Promise(r => setTimeout(r, ms));
-}
-
-async function waitForElement(page, selector, maxRetries = params.MAX_TEXT_EDITOR_FINDER_SECONDS_AWAIT, delay = 1000) {
-  console.log('awaiting for the element ' +  maxRetries )
-  const el = await page.$(selector);
-  if (el) return el;
-  if (maxRetries <= 0) return null;
-  await sleep(delay);
-  return waitForElement(page, selector, maxRetries - 1, delay);
-}
-
-function getImages() {
-  return readdirSync(imgsDir)
-    .filter(f => /\.(jpe?g|png|gif|webp)$/i.test(f))
-    .map(f => join(imgsDir, f));
-}
-
-function getAllImages() {
-  return getImages();
-}
-
-async function goto(page, url, retries = params.MAX_NAVEGATION_RETRIES, timeout = 240000 ) {
-  try{
-    await page.goto(url,  { waitUntil: 'load', timeout })
-  } catch(err){
-    console.error('Navegation Fails:',err.message )
-    console.log('retrying:', retries)
-    if(retries < 0 ) return console.log('max retries exeded')
-    await goto(page, url, retries - 1, timeout )
-  }
-}
-
 async function postToGroup(page, url) {
   console.log(`  Navegando a: ${url}`);
   // await page.goto(url, { waitUntil: 'load', timeout: 600000 });
-  await goto(page, url)
+  await goto(page, url, params.MAX_NAVEGATION_RETRIES)
   console.log('Loaded ✅')
 
   const crearBtnSelectors = [
@@ -97,7 +59,8 @@ async function postToGroup(page, url) {
 
   const lexicalEditor = await waitForElement(
     page,
-    'div[role="dialog"] div[contenteditable="true"][data-lexical-editor="true"]'
+    'div[role="dialog"] div[contenteditable="true"][data-lexical-editor="true"]',
+    params.MAX_TEXT_EDITOR_FINDER_SECONDS_AWAIT
   );
   if (!lexicalEditor) {
     console.log(`  ❌ No se pudo encontrar el editor de texto`);
@@ -116,7 +79,7 @@ async function postToGroup(page, url) {
   });
   console.log(`  Texto detectado: "${textContent.substring(0, 50)}..."`);
 
-  const images = getAllImages();
+  const images = getAllImages(imgsDir);
   if (images.length > 0) {
     console.log(`  Subiendo ${images.length} imágenes...`);
 
