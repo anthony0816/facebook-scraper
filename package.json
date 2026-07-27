@@ -17,8 +17,6 @@
     "status:dedup": "node publicacion/status.mjs dedup",
     "collect": "node publicacion/collectUrls.mjs",
     "collect:edge": "node publicacion/collectUrls.mjs edge",
-    "public:byten": "node publicacion/publicByten.mjs",
-    "public:byten:edge": "node publicacion/publicByten.mjs edge",
     "migrate_urls": "node publicacion/migrateUrls.mjs",
     "public:multi": "node publicacion/publicMulti.mjs",
     "public:multi:edge": "node publicacion/publicMulti.mjs edge"
