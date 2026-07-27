@@ -2,10 +2,11 @@ import { getDriver } from '../drivers/index.mjs';
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { grups_urls } from './grups_urls/grups.mjs';
 import { message } from './message/message.mjs';
 import { params } from './public_params.mjs';
 import { isVisited, markVisited, markVisitedOnError } from './groupTrace.mjs';
-import { sleep, randomBetween, waitForElement, getAllImages, goto } from './utils.mjs';
+import { sleep, randomBetween, waitForElement, getAllImages, goto, waitForSearchResults } from './utils.mjs';
 
 const browserName = process.argv[2] || 'chrome';
 const driver = getDriver(browserName);
@@ -20,22 +21,44 @@ if (!existsSync(COLLECTED_FILE)) {
 }
 
 const allGroups = JSON.parse(readFileSync(COLLECTED_FILE, 'utf-8'));
+const allowedUrls = new Set(grups_urls.map(u => u.trim()));
 
-const queue = allGroups.filter(g => !isVisited(g.url, r => r?.status === 'success'));
-console.log(`  ${allGroups.length} grupos totales, ${queue.length} pendientes (${allGroups.length - queue.length} ya publicados)`);
+const pending = allGroups.filter(g =>
+  allowedUrls.has(g.url) && !isVisited(g.url, r => r?.status === 'success')
+);
+console.log(`  ${allGroups.length} en collected.json, ${grups_urls.length} en grups.mjs, ${pending.length} pendientes`);
 
+const nameCount = new Map();
+for (const g of pending) {
+  const key = g.name.toLowerCase();
+  nameCount.set(key, (nameCount.get(key) || 0) + 1);
+}
+
+const dupGroups = [];
+const uniqueGroups = [];
+for (const g of pending) {
+  const key = g.name.toLowerCase();
+  if (nameCount.get(key) >= 2) {
+    dupGroups.push(g);
+  } else {
+    uniqueGroups.push(g);
+  }
+}
+
+const batches = [];
 const byName = new Map();
-for (const g of queue) {
+for (const g of dupGroups) {
   const key = g.name.toLowerCase();
   if (!byName.has(key)) byName.set(key, []);
   byName.get(key).push(g);
 }
-
-const batches = [];
 for (const [, gs] of byName) {
   for (let i = 0; i < gs.length; i += params.BATCH_SIZE) {
     batches.push(gs.slice(i, i + params.BATCH_SIZE));
   }
+}
+for (let i = 0; i < uniqueGroups.length; i += params.BATCH_SIZE) {
+  batches.push(uniqueGroups.slice(i, i + params.BATCH_SIZE));
 }
 
 async function openComposer(page) {
@@ -58,7 +81,6 @@ async function writeText(page) {
   const editor = await waitForElement(
     page,
     'div[role="dialog"] div[contenteditable="true"][data-lexical-editor="true"]',
-    params.MAX_TEXT_EDITOR_FINDER_SECONDS_AWAIT
   );
   if (!editor) return false;
 
@@ -119,7 +141,7 @@ async function clickAddGroups(page) {
   });
 }
 
-async function searchInputWith(page, groupName) {
+async function searchAndClear(page, groupName) {
   const input = await page.$(
     'div[role="dialog"] input[type="search"], ' +
     'div[role="dialog"] input[placeholder*="buscar" i], ' +
@@ -140,10 +162,10 @@ async function searchInputWith(page, groupName) {
 
 async function selectGroupsInModal(page, groupName) {
   const lowerName = groupName.toLowerCase();
-  const searchInput = await searchInputWith(page, groupName);
+  const searchInput = await searchAndClear(page, groupName);
   if (!searchInput) return 0;
 
-  await sleep(1500);
+  await waitForSearchResults(page, groupName);
 
   const clicked = await page.evaluate((name) => {
     const items = document.querySelectorAll(
@@ -163,6 +185,36 @@ async function selectGroupsInModal(page, groupName) {
   }, lowerName);
 
   return clicked;
+}
+
+async function selectNamesInModal(page, names) {
+  let selected = 0;
+  for (const name of names) {
+    const searchInput = await searchAndClear(page, name);
+    if (!searchInput) continue;
+    await waitForSearchResults(page, name);
+
+    const clicked = await page.evaluate((n) => {
+      const spans = document.querySelectorAll('div[role="dialog"] span');
+      for (const span of spans) {
+        if (span.textContent.trim().toLowerCase() !== n.toLowerCase()) continue;
+        let p = span;
+        for (let i = 0; i < 10; i++) {
+          p = p.parentElement;
+          if (!p) break;
+          const cb = p.querySelector('input[type="checkbox"]');
+          if (cb && cb.getAttribute('aria-checked') === 'false') {
+            cb.click();
+            return true;
+          }
+        }
+      }
+      return false;
+    }, name);
+
+    if (clicked) selected++;
+  }
+  return selected;
 }
 
 async function clickBack(page) {
@@ -195,7 +247,7 @@ async function clickPublish(page) {
 
 async function postBatch(page, batch) {
   const firstUrl = batch[0].url;
-  const name = batch[0].name;
+  const sameName = batch.every(g => g.name.toLowerCase() === batch[0].name.toLowerCase());
 
   console.log(`  Navegando a: ${firstUrl}`);
   await goto(page, firstUrl, params.MAX_NAVEGATION_RETRIES);
@@ -217,10 +269,28 @@ async function postBatch(page, batch) {
     console.log(`  ❌ No se encontró botón "Añadir grupos"`);
     return { success: false };
   }
-  await sleep(2000);
 
-  console.log(`  Buscando "${name}" en el modal...`);
-  const selected = await selectGroupsInModal(page, name);
+  console.log(`  Esperando a que cargue el modal...`);
+  const searchInput = await waitForElement(
+    page,
+    'div[role="dialog"] input[type="search"], ' +
+    'div[role="dialog"] input[placeholder*="buscar" i], ' +
+    'div[role="dialog"] input[placeholder*="search" i]',
+  );
+  if (!searchInput) {
+    console.log(`  ⚠️ No se detectó el campo de búsqueda en el modal`);
+    return { success: false };
+  }
+
+  let selected = 0;
+  if (sameName) {
+    console.log(`  Buscando "${batch[0].name}" en el modal...`);
+    selected = await selectGroupsInModal(page, batch[0].name);
+  } else {
+    const names = batch.slice(1).map(g => g.name);
+    console.log(`  Buscando ${names.length} nombres distintos...`);
+    selected = await selectNamesInModal(page, names);
+  }
   console.log(`  ${selected} grupos adicionales seleccionados`);
 
   const actualBatch = [batch[0], ...batch.slice(1, 1 + selected)];
@@ -244,9 +314,15 @@ async function main() {
   const context = await driver.launch();
   const page = await context.newPage();
 
-  console.log(`[2/3] ${queue.length} pendientes | ${batches.length} batches`);
+  const dupCount = dupGroups.length;
+  const uniCount = uniqueGroups.length;
+  console.log(`[2/3] ${pending.length} pendientes | ${dupCount} con nombres repetidos, ${uniCount} únicos | ${batches.length} batches`);
+
   for (const [i, b] of batches.entries()) {
-    console.log(`  Batch ${i + 1} (${b.length}): "${b[0].name}"`);
+    const label = b.every(g => g.name.toLowerCase() === b[0].name.toLowerCase())
+      ? `"${b[0].name}" (x${b.length})`
+      : `mixto (${b.length} grupos)`;
+    console.log(`  Batch ${i + 1} (${b.length}): ${label}`);
   }
 
   for (let b = 0; b < batches.length; b++) {
@@ -262,7 +338,7 @@ async function main() {
       }
       const remaining = batch.length - actualBatch.length;
       if (remaining > 0) {
-        console.log(`  ✅ ${actualBatch.length} publicados, ${remaining} quedaron sin seleccionar (límite de FB)`);
+        console.log(`  ✅ ${actualBatch.length} publicados, ${remaining} sin seleccionar (límite de FB)`);
       } else {
         console.log(`  ✅ ${actualBatch.length} publicados`);
       }
