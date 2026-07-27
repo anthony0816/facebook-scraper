@@ -1,19 +1,26 @@
 import { getDriver } from '../drivers/index.mjs';
-import { grups_urls } from './grups_urls/grups.mjs';
-import { message } from './message/message.mjs';
+import { readFileSync, existsSync } from 'fs';
 import { params } from './public_params.mjs';
 import { isVisited, markVisited, markVisitedOnError } from './groupTrace.mjs';
 import { sleep, randomBetween, waitForElement, getAllImages, goto } from './utils.mjs';
-import { fileURLToPath } from 'url';
 import { join } from 'path';
+import { ensureActiveProfilePath } from './profileManager.mjs';
 
 const browserName = process.argv[2] || 'chrome';
 const driver = getDriver(browserName);
 
-const __dirname = fileURLToPath(new URL('.', import.meta.url));
-const imgsDir = join(__dirname, 'imgs');
+const profilePath = ensureActiveProfilePath();
+const GRUPS_FILE = join(profilePath, 'grups.json');
+const MESSAGE_FILE = join(profilePath, 'message.json');
+const imgsDir = join(profilePath, 'imgs');
 
-async function postToGroup(page, url) {
+const grups_urls = existsSync(GRUPS_FILE)
+  ? JSON.parse(readFileSync(GRUPS_FILE, 'utf-8'))
+  : [];
+
+const message = existsSync(MESSAGE_FILE)
+  ? JSON.parse(readFileSync(MESSAGE_FILE, 'utf-8')).text
+  : '';async function postToGroup(page, url) {
   console.log(`  Navegando a: ${url}`);
   // await page.goto(url, { waitUntil: 'load', timeout: 600000 });
   await goto(page, url, params.MAX_NAVEGATION_RETRIES)
@@ -98,12 +105,11 @@ async function postToGroup(page, url) {
       const btn = await page.$(sel);
       if (btn) {
         console.log(`  Haciendo clic en botón de foto...`);
-        await btn.click();
-        await sleep(2000);
-
         const [fileChooser] = await Promise.all([
-          page.waitForEvent('filechooser', { timeout: 5000 }).catch(() => null),
+          page.waitForEvent('filechooser', { timeout: 10000 }).catch(() => null),
+          btn.click(),
         ]);
+        await sleep(2000);
 
         if (fileChooser) {
           await fileChooser.setFiles(images);

@@ -1,19 +1,19 @@
 import { getDriver } from '../drivers/index.mjs';
-import { readFileSync, existsSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
-import { grups_urls } from './grups_urls/grups.mjs';
-import { message } from './message/message.mjs';
+import { readFileSync, existsSync, writeFileSync } from 'fs';
+import { join } from 'path';
 import { params } from './public_params.mjs';
 import { isVisited, markVisited, markVisitedOnError } from './groupTrace.mjs';
 import { sleep, randomBetween, waitForElement, getAllImages, goto, waitForSearchResults } from './utils.mjs';
+import { ensureActiveProfilePath, getActiveProfileName } from './profileManager.mjs';
 
 const browserName = process.argv[2] || 'chrome';
 const driver = getDriver(browserName);
 
-const __dirname = fileURLToPath(new URL('.', import.meta.url));
-const COLLECTED_FILE = join(__dirname, 'collected_groups.json');
-const imgsDir = join(__dirname, 'imgs');
+const profilePath = ensureActiveProfilePath();
+const COLLECTED_FILE = join(profilePath, 'collected_groups.json');
+const GRUPS_FILE = join(profilePath, 'grups.json');
+const MESSAGE_FILE = join(profilePath, 'message.json');
+const imgsDir = join(profilePath, 'imgs');
 
 if (!existsSync(COLLECTED_FILE)) {
   console.error('❌ No se encuentra collected_groups.json. Ejecutá pnpm collect primero.');
@@ -21,12 +21,18 @@ if (!existsSync(COLLECTED_FILE)) {
 }
 
 const allGroups = JSON.parse(readFileSync(COLLECTED_FILE, 'utf-8'));
-const allowedUrls = new Set(grups_urls.map(u => u.trim()));
+const allowedUrls = existsSync(GRUPS_FILE)
+  ? new Set(JSON.parse(readFileSync(GRUPS_FILE, 'utf-8')))
+  : new Set();
+
+const message = existsSync(MESSAGE_FILE)
+  ? JSON.parse(readFileSync(MESSAGE_FILE, 'utf-8')).text
+  : '';
 
 const pending = allGroups.filter(g =>
   allowedUrls.has(g.url) && !isVisited(g.url, r => r?.status === 'success')
 );
-console.log(`  ${allGroups.length} en collected.json, ${grups_urls.length} en grups.mjs, ${pending.length} pendientes`);
+console.log(`  ${allGroups.length} en collected.json, ${allowedUrls.size} en grups.json, ${pending.length} pendientes`);
 
 const nameCount = new Map();
 for (const g of pending) {
@@ -97,11 +103,11 @@ async function uploadImages(page) {
   const photoSel = 'div[aria-label="Foto/video"], div[aria-label="Photo/video"], div[role="button"]:has-text("Foto")';
   const btn = await page.$(photoSel);
   if (btn) {
-    await btn.click();
-    await sleep(2000);
     const [chooser] = await Promise.all([
-      page.waitForEvent('filechooser', { timeout: 5000 }).catch(() => null),
+      page.waitForEvent('filechooser', { timeout: 10000 }).catch(() => null),
+      btn.click(),
     ]);
+    await sleep(2000);
     if (chooser) {
       await chooser.setFiles(images);
       await sleep(params.WAIT_FOR_IMAGES_UPLOAD);

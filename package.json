@@ -19,7 +19,12 @@
     "collect:edge": "node publicacion/collectUrls.mjs edge",
     "migrate_urls": "node publicacion/migrateUrls.mjs",
     "public:multi": "node publicacion/publicMulti.mjs",
-    "public:multi:edge": "node publicacion/publicMulti.mjs edge"
+    "public:multi:edge": "node publicacion/publicMulti.mjs edge",
+    "profile:create": "node publicacion/profile.mjs create",
+    "profile:list": "node publicacion/profile.mjs list",
+    "profile:checkout": "node publicacion/profile.mjs checkout",
+    "profile:delete": "node publicacion/profile.mjs delete",
+    "profile:init": "node publicacion/profile.mjs init"
   },
   "keywords": [],
   "author": "",

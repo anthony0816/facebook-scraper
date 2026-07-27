@@ -1,13 +1,12 @@
 import { getDriver } from '../drivers/index.mjs';
 import { writeFileSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { join } from 'path';
+import { ensureActiveProfilePath } from './profileManager.mjs';
 
 const browserName = process.argv[2] || 'chrome';
 const driver = getDriver(browserName);
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const OUTPUT_FILE = join(__dirname, 'collected_groups.json');
+const OUTPUT_FILE = join(ensureActiveProfilePath(), 'collected_groups.json');
 
 function sleep(ms) {
   return new Promise(r => setTimeout(r, ms));

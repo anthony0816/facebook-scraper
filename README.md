@@ -13,6 +13,18 @@ Automatización de Facebook usando Playwright con Chrome/Edge/Firefox real. Abre
 pnpm install
 ```
 
+## Sistema de Perfiles
+
+Cada perfil tiene sus propios grupos, imágenes, mensaje y registro de publicación. Útil para manejar múltiples cuentas o nichos.
+
+```powershell
+pnpm profile:init                     # Crea perfil "default" con migración automática
+pnpm profile:create <name>            # Crea nuevo perfil
+pnpm profile:list                     # Lista perfiles existentes
+pnpm profile:checkout <name>          # Cambia perfil activo + migra grupos
+pnpm profile:delete <name>            # Elimina perfil
+```
+
 ## Comandos
 
 ### Navegación / Test
@@ -28,9 +40,9 @@ pnpm edge              # atajo para Edge
 pnpm firefox           # atajo para Firefox
 ```
 
-### Publicación en grupos
+### Publicación secuencial (grupo por grupo)
 
-Lee los grupos de `publicacion/grups_urls/grups.mjs`, escribe el mensaje de `publicacion/message/message.mjs`, sube todas las imágenes de `publicacion/imgs/` y publica en cada grupo con una espera aleatoria entre cada uno.
+Lee los grupos de `<perfil>/grups.json`, escribe el mensaje de `<perfil>/message.json`, sube todas las imágenes de `<perfil>/imgs/` y publica en cada grupo con una espera aleatoria entre cada uno.
 
 ```powershell
 pnpm public            # Chrome (por defecto)
@@ -38,14 +50,42 @@ pnpm public:chrome     # Chrome
 pnpm public:edge       # Edge
 ```
 
-El navegador **no se cierra** al terminar. El archivo `publicacion/visited.json` registra los grupos donde ya se publicó para evitar duplicados en la próxima ejecución.
+### Publicación multi-grupo (compositor nativo)
+
+Usa el modal "Añadir grupos" de Facebook para publicar en hasta 10 grupos a la vez con el mismo mensaje e imágenes. Agrupa por nombre para manejar duplicados, busca por nombre exacto, y publica en lotes dinámicos.
+
+```powershell
+pnpm public:multi           # Chrome (por defecto)
+pnpm public:multi:edge      # Edge
+```
+
+### Colectar URLs de grupos
+
+Navega al feed y extrae las URLs y nombres de los grupos visibles por scroll.
+
+```powershell
+pnpm collect            # Chrome (por defecto)
+pnpm collect:edge       # Edge
+```
+
+El resultado se guarda en `<perfil>/collected_groups.json`. Luego usa `migrate_urls` para exportarlos a `grups.json`.
+
+### Migrar URLs
+
+Exporta URLs desde `collected_groups.json` a `grups.json` del perfil activo.
+
+```powershell
+pnpm migrate_urls
+```
 
 ### Estado
 
 ```powershell
 pnpm status:count      # Muestra cuántos grupos están publicados del total
-pnpm status:dedup      # Elimina URLs duplicadas de grups.mjs
+pnpm status:dedup      # Elimina URLs duplicadas de grups.json
 ```
+
+El navegador **no se cierra** al terminar ningún script. El archivo `<perfil>/visited.json` registra los grupos donde ya se publicó (con estado success/error) para evitar duplicados.
 
 Ejemplo de `status:count`:
 
@@ -70,21 +110,25 @@ facebook-scraper/
 │   ├── chrome.mjs         ← Driver para Chrome
 │   ├── edge.mjs           ← Driver para Edge
 │   └── firefox.mjs        ← Driver para Firefox
-├── scripts/
-│   ├── launch-chrome.ps1  ← (obsoleto) Antes iniciaba Chrome con CDP
-│   ├── launch-edge.ps1
-│   └── launch-firefox.ps1
 ├── publicacion/
-│   ├── public.mjs         ← Script de publicación en grupos
+│   ├── public.mjs         ← Script de publicación secuencial
+│   ├── publicMulti.mjs    ← Script de publicación multi-grupo (compositor nativo)
+│   ├── collectUrls.mjs    ← Script para extraer URLs y nombres de grupos
+│   ├── migrateUrls.mjs    ← Exporta collected_groups → grups.json
 │   ├── public_params.mjs  ← Configuración de tiempos (tuneable)
-│   ├── groupTrace.mjs     ← Control de grupos ya publicados
+│   ├── groupTrace.mjs     ← Control de grupos ya publicados (visited.json)
 │   ├── status.mjs         ← Comandos de estado (count, dedup)
-│   ├── visited.json       ← Registro de grupos publicados (se genera solo)
-│   ├── grups_urls/
-│   │   └── grups.mjs      ← URLs de los grupos destino
-│   ├── message/
-│   │   └── message.mjs    ← Texto del mensaje a publicar
-│   └── imgs/              ← Imágenes para adjuntar (jpg, png)
+│   ├── profileManager.mjs ← CRUD de perfiles
+│   ├── profile.mjs        ← CLI de perfiles
+│   ├── utils.mjs          ← Utilidades compartidas (sleep, waitForElement, goto, etc.)
+│   └── profiles/          ← Datos de cada perfil
+│       ├── profiles.json  ← Registro de perfiles (activo + lista)
+│       └── <nombre>/
+│           ├── collected_groups.json  ← URLs + nombres extraídos
+│           ├── grups.json             ← URLs seleccionadas para publicar
+│           ├── message.json           ← Texto del mensaje
+│           ├── visited.json           ← Registro de publicaciones
+│           └── imgs/                  ← Imágenes para adjuntar
 ├── index.mjs              ← Script de prueba / navegación simple
 ├── package.json
 └── README.md
@@ -103,9 +147,14 @@ En `publicacion/public_params.mjs`:
 | `WAIT_AFTER_TYPING` | 3s | Espera después de escribir |
 | `WAIT_FOR_IMAGES_UPLOAD` | 15s | Espera subida de imágenes |
 | `WAIT_AFTER_POST_CLICK` | 5s | Espera después de publicar |
+| `BATCH_SIZE` | 10 | Grupos máximos por lote en multi-grupo |
+| `REST_BETWEEN_BATCHES` | 120s | Espera entre lotes en multi-grupo |
+| `MAX_NAVEGATION_RETRIES` | 4 | Reintentos de navegación ante fallo |
 
 ## Notas
 
 - El script **mata el navegador** al inicio para liberar el perfil (Chrome/Edge/Firefox se cierran automáticamente).
 - Chrome 127+ no permite usar `--remote-debugging-pipe` con el `user-data-dir` por defecto. El driver copia cookies del perfil real a uno temporal para evitarlo.
 - El navegador queda abierto al finalizar para que puedas ver el resultado.
+- La publicación multi-grupo usa el modal nativo de Facebook ("Añadir grupos"), buscando por nombre. Soporta duplicados (nombres repetidos) y grupos únicos.
+- `grups.json` contiene solo las URLs (no los nombres) — es la lista curada de grupos donde realmente publicar.

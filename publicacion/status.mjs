@@ -1,16 +1,16 @@
 import { readFileSync, writeFileSync, existsSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { join } from 'path';
+import { ensureActiveProfilePath } from './profileManager.mjs';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const VISITED_FILE = join(__dirname, 'visited.json');
-const GRUPS_FILE = join(__dirname, 'grups_urls', 'grups.mjs');
+const profilePath = ensureActiveProfilePath();
+const VISITED_FILE = join(profilePath, 'visited.json');
+const GRUPS_FILE = join(profilePath, 'grups.json');
 
 const command = process.argv[2];
 
-async function getTotalGroups() {
-  const mod = await import(pathToFileURL(GRUPS_FILE).href);
-  return mod.grups_urls.map(u => u.trim()).filter(Boolean);
+function getTotalGroups() {
+  if (!existsSync(GRUPS_FILE)) return [];
+  return JSON.parse(readFileSync(GRUPS_FILE, 'utf-8')).filter(Boolean);
 }
 
 function readVisited() {
@@ -27,9 +27,9 @@ function normalizeUrl(url) {
 }
 
 async function count() {
-  const groups = await getTotalGroups();
+  const groups = getTotalGroups();
   const visited = readVisited();
-  const published = groups.filter(url => url in visited );
+  const published = groups.filter(url => url in visited);
   const pct = groups.length ? ((published.length / groups.length) * 100).toFixed(1) : '0';
 
   if (published.length > 0) {
@@ -44,33 +44,24 @@ async function count() {
 }
 
 async function dedup() {
-  const content = readFileSync(GRUPS_FILE, 'utf-8');
-  const lines = content.split('\n');
-
+  const urls = getTotalGroups();
   const seen = new Set();
-  const newLines = [];
+  const unique = [];
   let removed = 0;
 
-  for (const line of lines) {
-    const match = line.match(/"((?:https?:\/\/)?[^"]+)"/);
-    if (match) {
-      const url = normalizeUrl(match[1]);
-      if (seen.has(url)) {
-        removed++;
-        continue;
-      }
-      seen.add(url);
+  for (const url of urls) {
+    const normalized = normalizeUrl(url);
+    if (seen.has(normalized)) {
+      removed++;
+      continue;
     }
-    newLines.push(line);
+    seen.add(normalized);
+    unique.push(normalized);
   }
 
-  writeFileSync(GRUPS_FILE, newLines.join('\n'), 'utf-8');
+  writeFileSync(GRUPS_FILE, JSON.stringify(unique, null, 2), 'utf-8');
   console.log(`Duplicados eliminados: ${removed}`);
-  console.log(`URLs únicas en grups.mjs: ${seen.size}`);
-
-  const mod = await import(pathToFileURL(GRUPS_FILE).href);
-  const active = mod.grups_urls.length;
-  console.log(`Activas (sin comentar): ${active}`);
+  console.log(`URLs únicas en grups.json: ${unique.length}`);
 }
 
 async function main() {
