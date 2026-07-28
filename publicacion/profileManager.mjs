@@ -103,7 +103,7 @@ export function listProfiles() {
     return;
   }
   for (const p of data.profiles) {
-    const marker = p === data.activeProfile ? '→' : ' ';
+    const marker = p === data.activeProfile ? '🔸' : '  ';
     console.log(` ${marker} ${p}`);
   }
 }
