@@ -6,7 +6,12 @@ const PROFILE_DEPURATION_DIR = ensureActiveProfilePath('depuration');
 const DEPURATORS_FILE = join(PROFILE_DEPURATION_DIR, 'depurators.json');
 const RULES_FILE = join(PROFILE_DEPURATION_DIR, 'rules', 'rules.json');
 const STATEMENTS_FILE = join(PROFILE_DEPURATION_DIR, 'staments', 'staments.json');
+// Agregado solo para que la función run sepa dónde está el archivo de datos
+const COLLECTED_GROUPS_FILE = join(PROFILE_DEPURATION_DIR, '../collected_groups.json');
 
+// =============================================
+// TU LÓGICA ORIGINAL (INTACTA)
+// =============================================
 function initDepuration() {
   // Create directories if they don't exist
   mkdirSync(PROFILE_DEPURATION_DIR, { recursive: true });
@@ -98,4 +103,129 @@ function initDepuration() {
   console.log('   - staments/staments.json');
 }
 
-initDepuration();
+// =============================================
+// NUEVA LÓGICA: EVALUACIÓN
+// =============================================
+function evaluateStatement(statement, group) {
+  const target = statement.target || 'name';
+  const operation = statement.operation || 'includes';
+  const value = statement.value || '';
+  const groupValue = group[target] ? group[target].toString().toLowerCase() : '';
+  const searchValue = value.toLowerCase();
+
+  switch (operation) {
+    case 'includes':
+      return groupValue.includes(searchValue);
+    case 'excludes':
+      return !groupValue.includes(searchValue);
+    case 'whole_word':
+      const safeValue = value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      return new RegExp(`\\b${safeValue}\\b`, 'i').test(group[target] || '');
+    case 'regex':
+      try {
+        return new RegExp(value).test(group[target] || '');
+      } catch {
+        return false;
+      }
+    default:
+      return false;
+  }
+}
+
+function evaluateRuleAST(ruleObj, group, statementsData) {
+  if (!ruleObj || !ruleObj.operator || !Array.isArray(ruleObj.operands)) return false;
+
+  const results = ruleObj.operands.map(operand => {
+    if (typeof operand === 'string') {
+      const statement = statementsData.statements[operand];
+      return statement ? evaluateStatement(statement, group) : false;
+    } else if (typeof operand === 'object') {
+      return evaluateRuleAST(operand, group, statementsData);
+    }
+    return false;
+  });
+
+  return ruleObj.operator === 'AND' ? results.every(Boolean) : results.some(Boolean);
+}
+
+// =============================================
+// NUEVA LÓGICA: EJECUCIÓN DEL DEPURADOR
+// =============================================
+async function depuratorRun(depuratorName) {
+  try {
+    const depuratorsData = JSON.parse(readFileSync(DEPURATORS_FILE, 'utf-8'));
+    const rulesData = JSON.parse(readFileSync(RULES_FILE, 'utf-8'));
+    const statementsData = JSON.parse(readFileSync(STATEMENTS_FILE, 'utf-8'));
+    const groups = JSON.parse(readFileSync(COLLECTED_GROUPS_FILE, 'utf-8'));
+
+    const depurator = depuratorsData.depurators?.[depuratorName];
+    if (!depurator || !Array.isArray(depurator.rules)) {
+      console.error(`❌ Depurador '${depuratorName}' no encontrado o mal formado.`);
+      const available = Object.keys(depuratorsData.depurators || {}).filter(k => k !== '_comment');
+      console.log(`   Disponibles: ${available.join(', ') || 'Ninguno'}`);
+      process.exit(1);
+    }
+
+    console.log(`🔍 Aplicando depurador: '${depuratorName}' (${depurator.rules.length} rules)`);
+
+    let passedCount = 0;
+    const processedGroups = groups.map(group => {
+      // AND implícito: TODAS las rules del array deben pasar
+      const passed = depurator.rules.every(ruleName => {
+        const ruleObj = rulesData.rules[ruleName];
+        if (!ruleObj) {
+          console.warn(`⚠️ Regla '${ruleName}' no encontrada en rules.json`);
+          return false;
+        }
+        return evaluateRuleAST(ruleObj, group, statementsData);
+      });
+
+      if (passed) passedCount++;
+
+      if (!group.depuration) group.depuration = {};
+      if (!group.depuration.depurators) group.depuration.depurators = {};
+
+      group.depuration.depurators[depuratorName] = { passed };
+      return group;
+    });
+
+    writeFileSync(COLLECTED_GROUPS_FILE, JSON.stringify(processedGroups, null, 2), 'utf-8');
+
+    console.log(`✅ Depuración completada:`);
+    console.log(`   Procesados: ${groups.length} | Aprobados: ${passedCount}`);
+
+    const examples = processedGroups.filter(g => g.depuration.depurators[depuratorName].passed).slice(0, 3);
+    if (examples.length > 0) {
+      console.log(`\nEjemplos aprobados:`);
+      examples.forEach(g => console.log(`   - ${g.name}`));
+    } else {
+      console.log('\n⚠️ Ningún grupo pasó. Revisa tus statements y rules.');
+    }
+
+  } catch (error) {
+    console.error(`❌ Error ejecutando depurador:`, error.message);
+    process.exit(1);
+  }
+}
+
+// =============================================
+// NUEVO ENTRY POINT (Punto de entrada CLI)
+// =============================================
+const command = process.argv[2];
+const depuratorName = process.argv[3];
+
+if (command === 'init') {
+  initDepuration();
+} else if (command === 'run') {
+  if (!depuratorName) {
+    console.error('❌ Falta el nombre del depurador.');
+    console.log('Uso: node depurator.mjs run <nombre_del_depurador>');
+    process.exit(1);
+  }
+  depuratorRun(depuratorName);
+} else {
+  console.log('Uso:');
+  console.log('  node depurator.mjs init');
+  console.log('  node depurator.mjs run <nombre_del_depurador>');
+  process.exit(1);
+}
