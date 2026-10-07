@@ -26,7 +26,8 @@
     "profile:delete": "node publicacion/profile.mjs delete",
     "profile:init": "node publicacion/profile.mjs init",
     "depurator:init": "node publicacion/depurator.mjs init",
-    "depurator:run": "node publicacion/depurator.mjs run"
+    "depurator:run": "node publicacion/depurator.mjs run",
+    "depurator:reset": "node publicacion/depurator.mjs reset"
   },
   "keywords": [],
   "author": "",

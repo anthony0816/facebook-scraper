@@ -209,8 +209,68 @@ async function depuratorRun(depuratorName) {
 }
 
 // =============================================
+//  LOGICA DEL RESET
+// =============================================
+
+function resetDepurator(depuratorName) {
+  try {
+    const groupsData = readFileSync(COLLECTED_GROUPS_FILE, 'utf-8');
+    const groups = JSON.parse(groupsData);
+
+    let resetCount = 0;
+
+    const updatedGroups = groups.map(group => {
+      if (depuratorName === "all") {
+        // Elimina toda la sección de depuración del grupo
+        if (group.depuration) {
+          delete group.depuration;
+          resetCount++;
+        }
+      } else {
+        // Elimina solo el depurador específico si existe
+        if (group.depuration?.depurators?.[depuratorName]) {
+          delete group.depuration.depurators[depuratorName];
+          resetCount++;
+
+          // Limpieza opcional: si no quedan más depuradores, elimina el objeto vacío
+          if (Object.keys(group.depuration.depurators).length === 0) {
+            delete group.depuration.depurators;
+          }
+          // Si la sección depuration queda vacía, también la eliminamos
+          if (Object.keys(group.depuration).length === 0) {
+            delete group.depuration;
+          }
+        }
+      }
+      return group;
+    });
+
+    // Guardar los cambios permanentemente
+    writeFileSync(COLLECTED_GROUPS_FILE, JSON.stringify(updatedGroups, null, 2), 'utf-8');
+
+    if (depuratorName === "all") {
+      console.log(`✅ Se eliminó toda la información de depuración de ${resetCount} grupos.`);
+    } else {
+      console.log(`✅ Se eliminó el depurador '${depuratorName}' de ${resetCount} grupos.`);
+    }
+  } catch (error) {
+    console.error(`❌ Error al resetear el depurador:`, error.message);
+  }
+}
+
+
+// =============================================
 // NUEVO ENTRY POINT (Punto de entrada CLI)
 // =============================================
+
+const RUN_USAGE = 'Uso: node depurator.mjs run <nombre_del_depurador>';
+const RESET_USAGE = 'Uso: node depurator.mjs reset <nombre_del_depurador> | all';
+
+function printError(usageMessage) {
+  console.error('❌ Falta el nombre del depurador.');
+  console.log(usageMessage);
+}
+
 const command = process.argv[2];
 const depuratorName = process.argv[3];
 
@@ -218,14 +278,26 @@ if (command === 'init') {
   initDepuration();
 } else if (command === 'run') {
   if (!depuratorName) {
-    console.error('❌ Falta el nombre del depurador.');
-    console.log('Uso: node depurator.mjs run <nombre_del_depurador>');
+    printError(RUN_USAGE);
     process.exit(1);
   }
   depuratorRun(depuratorName);
+} else if (command === 'reset') {
+  if (!depuratorName) {
+    printError(RESET_USAGE);
+    process.exit(1);
+  }
+  
+  // Llamamos a la función. No hace falta 'return', el script terminará al llegar al final.
+  if (depuratorName === 'all') {
+    resetDepurator('all');
+  } else {
+    resetDepurator(depuratorName);
+  }
 } else {
   console.log('Uso:');
   console.log('  node depurator.mjs init');
   console.log('  node depurator.mjs run <nombre_del_depurador>');
+  console.log('  node depurator.mjs reset <nombre_del_depurador> | all');
   process.exit(1);
 }
