@@ -4,13 +4,20 @@ import { ensureActiveProfilePath } from './profileManager.mjs';
 
 const profilePath = ensureActiveProfilePath();
 const VISITED_FILE = join(profilePath, 'visited.json');
-const GRUPS_FILE = join(profilePath, 'grups.json');
+const COLLECTED_FILE = join(profilePath, 'collected_groups.json');
 
 const command = process.argv[2];
 
+function readCollected() {
+  if (!existsSync(COLLECTED_FILE)) return [];
+  return JSON.parse(readFileSync(COLLECTED_FILE, 'utf-8'));
+}
+
 function getTotalGroups() {
-  if (!existsSync(GRUPS_FILE)) return [];
-  return JSON.parse(readFileSync(GRUPS_FILE, 'utf-8')).filter(Boolean);
+  return readCollected()
+    .filter(g => g.approved !== false)
+    .map(g => g.url)
+    .filter(Boolean);
 }
 
 function readVisited() {
@@ -44,24 +51,24 @@ async function count() {
 }
 
 async function dedup() {
-  const urls = getTotalGroups();
+  const groups = readCollected();
   const seen = new Set();
   const unique = [];
   let removed = 0;
 
-  for (const url of urls) {
-    const normalized = normalizeUrl(url);
+  for (const g of groups) {
+    const normalized = normalizeUrl(g.url);
     if (seen.has(normalized)) {
       removed++;
       continue;
     }
     seen.add(normalized);
-    unique.push(normalized);
+    unique.push({ ...g, url: normalized });
   }
 
-  writeFileSync(GRUPS_FILE, JSON.stringify(unique, null, 2), 'utf-8');
+  writeFileSync(COLLECTED_FILE, JSON.stringify(unique, null, 2), 'utf-8');
   console.log(`Duplicados eliminados: ${removed}`);
-  console.log(`URLs únicas en grups.json: ${unique.length}`);
+  console.log(`URLs únicas en collected_groups.json: ${unique.length}`);
 }
 
 async function main() {

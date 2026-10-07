@@ -10,12 +10,14 @@ const browserName = process.argv[2] || 'chrome';
 const driver = getDriver(browserName);
 
 const profilePath = ensureActiveProfilePath();
-const GRUPS_FILE = join(profilePath, 'grups.json');
+const COLLECTED_FILE = join(profilePath, 'collected_groups.json');
 const MESSAGE_FILE = join(profilePath, 'message.json');
 const imgsDir = join(profilePath, 'imgs');
 
-const grups_urls = existsSync(GRUPS_FILE)
-  ? JSON.parse(readFileSync(GRUPS_FILE, 'utf-8'))
+const grups_urls = existsSync(COLLECTED_FILE)
+  ? JSON.parse(readFileSync(COLLECTED_FILE, 'utf-8'))
+      .filter(g => g.approved !== false)
+      .map(g => g.url)
   : [];
 
 const message = existsSync(MESSAGE_FILE)

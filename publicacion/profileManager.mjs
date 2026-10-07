@@ -57,7 +57,6 @@ export function createProfile(name) {
   const files = {
     'collected_groups.json': '[]',
     'visited.json': '{}',
-    'grups.json': '[]',
     'message.json': '{"text": ""}',
   };
 
@@ -89,9 +88,6 @@ export async function checkoutProfile(name) {
   data.activeProfile = name;
   writeData(data);
   console.log(`✅ Perfil activo cambiado a: "${name}"`);
-
-  const { migrateProfile } = await import('./migrateUrls.mjs');
-  await migrateProfile(name);
 
   return true;
 }

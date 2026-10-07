@@ -11,7 +11,6 @@ const driver = getDriver(browserName);
 
 const profilePath = ensureActiveProfilePath();
 const COLLECTED_FILE = join(profilePath, 'collected_groups.json');
-const GRUPS_FILE = join(profilePath, 'grups.json');
 const MESSAGE_FILE = join(profilePath, 'message.json');
 const imgsDir = join(profilePath, 'imgs');
 
@@ -21,18 +20,15 @@ if (!existsSync(COLLECTED_FILE)) {
 }
 
 const allGroups = JSON.parse(readFileSync(COLLECTED_FILE, 'utf-8'));
-const allowedUrls = existsSync(GRUPS_FILE)
-  ? new Set(JSON.parse(readFileSync(GRUPS_FILE, 'utf-8')))
-  : new Set();
 
 const message = existsSync(MESSAGE_FILE)
   ? JSON.parse(readFileSync(MESSAGE_FILE, 'utf-8')).text
   : '';
 
 const pending = allGroups.filter(g =>
-  allowedUrls.has(g.url) && !isVisited(g.url, r => r?.status === 'success')
+  g.approved !== false && !isVisited(g.url, r => r?.status === 'success')
 );
-console.log(`  ${allGroups.length} en collected.json, ${allowedUrls.size} en grups.json, ${pending.length} pendientes`);
+console.log(`  ${allGroups.length} en collected_groups.json, ${pending.length} pendientes`);
 
 const nameCount = new Map();
 for (const g of pending) {

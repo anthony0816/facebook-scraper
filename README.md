@@ -18,10 +18,10 @@ pnpm install
 Cada perfil tiene sus propios grupos, imágenes, mensaje y registro de publicación. Útil para manejar múltiples cuentas o nichos.
 
 ```powershell
-pnpm profile:init                     # Crea perfil "default" con migración automática
+pnpm profile:init                     # Crea perfil "default"
 pnpm profile:create <name>            # Crea nuevo perfil
 pnpm profile:list                     # Lista perfiles existentes
-pnpm profile:checkout <name>          # Cambia perfil activo + migra grupos
+pnpm profile:checkout <name>          # Cambia perfil activo
 pnpm profile:delete <name>            # Elimina perfil
 ```
 
@@ -42,7 +42,7 @@ pnpm firefox           # atajo para Firefox
 
 ### Publicación secuencial (grupo por grupo)
 
-Lee los grupos de `<perfil>/grups.json`, escribe el mensaje de `<perfil>/message.json`, sube todas las imágenes de `<perfil>/imgs/` y publica en cada grupo con una espera aleatoria entre cada uno.
+Lee los grupos aprobados de `<perfil>/collected_groups.json` (todos salvo los marcados `"approved": false`), escribe el mensaje de `<perfil>/message.json`, sube todas las imágenes de `<perfil>/imgs/` y publica en cada grupo con una espera aleatoria entre cada uno.
 
 ```powershell
 pnpm public            # Chrome (por defecto)
@@ -68,21 +68,13 @@ pnpm collect            # Chrome (por defecto)
 pnpm collect:edge       # Edge
 ```
 
-El resultado se guarda en `<perfil>/collected_groups.json`. Luego usa `migrate_urls` para exportarlos a `grups.json`.
-
-### Migrar URLs
-
-Exporta URLs desde `collected_groups.json` a `grups.json` del perfil activo.
-
-```powershell
-pnpm migrate_urls
-```
+El resultado se guarda en `<perfil>/collected_groups.json`. Todos los grupos ahí se consideran aprobados para publicar salvo que se les marque manualmente `"approved": false`.
 
 ### Estado
 
 ```powershell
 pnpm status:count      # Muestra cuántos grupos están publicados del total
-pnpm status:dedup      # Elimina URLs duplicadas de grups.json
+pnpm status:dedup      # Elimina URLs duplicadas de collected_groups.json
 ```
 
 El navegador **no se cierra** al terminar ningún script. El archivo `<perfil>/visited.json` registra los grupos donde ya se publicó (con estado success/error) para evitar duplicados.
@@ -114,7 +106,6 @@ facebook-scraper/
 │   ├── public.mjs         ← Script de publicación secuencial
 │   ├── publicMulti.mjs    ← Script de publicación multi-grupo (compositor nativo)
 │   ├── collectUrls.mjs    ← Script para extraer URLs y nombres de grupos
-│   ├── migrateUrls.mjs    ← Exporta collected_groups → grups.json
 │   ├── public_params.mjs  ← Configuración de tiempos (tuneable)
 │   ├── groupTrace.mjs     ← Control de grupos ya publicados (visited.json)
 │   ├── status.mjs         ← Comandos de estado (count, dedup)
@@ -124,8 +115,7 @@ facebook-scraper/
 │   └── profiles/          ← Datos de cada perfil
 │       ├── profiles.json  ← Registro de perfiles (activo + lista)
 │       └── <nombre>/
-│           ├── collected_groups.json  ← URLs + nombres extraídos
-│           ├── grups.json             ← URLs seleccionadas para publicar
+│           ├── collected_groups.json  ← URLs + nombres extraídos (añadir "approved": false para excluir uno de publicar)
 │           ├── message.json           ← Texto del mensaje
 │           ├── visited.json           ← Registro de publicaciones
 │           └── imgs/                  ← Imágenes para adjuntar
@@ -157,4 +147,4 @@ En `publicacion/public_params.mjs`:
 - Chrome 127+ no permite usar `--remote-debugging-pipe` con el `user-data-dir` por defecto. El driver copia cookies del perfil real a uno temporal para evitarlo.
 - El navegador queda abierto al finalizar para que puedas ver el resultado.
 - La publicación multi-grupo usa el modal nativo de Facebook ("Añadir grupos"), buscando por nombre. Soporta duplicados (nombres repetidos) y grupos únicos.
-- `grups.json` contiene solo las URLs (no los nombres) — es la lista curada de grupos donde realmente publicar.
+- `collected_groups.json` es la única fuente de verdad de grupos: todo grupo se considera aprobado para publicar salvo que se le marque `"approved": false` manualmente.
