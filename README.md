@@ -50,6 +50,12 @@ pnpm public:chrome     # Chrome
 pnpm public:edge       # Edge
 ```
 
+Para publicar solo en los grupos que pasaron un depurador específico (según el campo `depuration.depurators.<nombre>.passed` ya guardado en `collected_groups.json` — no se recomputa nada en tiempo real; un grupo sin esa estructura o con `passed: false` se omite):
+
+```powershell
+pnpm public:chrome -- -depurator <nombre>
+```
+
 ### Publicación multi-grupo (compositor nativo)
 
 Usa el modal "Añadir grupos" de Facebook para publicar en hasta 10 grupos a la vez con el mismo mensaje e imágenes. Agrupa por nombre para manejar duplicados, busca por nombre exacto, y publica en lotes dinámicos.

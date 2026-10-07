@@ -6,7 +6,10 @@ import { sleep, randomBetween, waitForElement, getAllImages, goto } from './util
 import { join } from 'path';
 import { ensureActiveProfilePath } from './profileManager.mjs';
 
-const browserName = process.argv[2] || 'chrome';
+const args = process.argv.slice(2);
+const depuratorFlagIdx = args.findIndex(a => a === '-depurator' || a === '--depurator');
+const depuratorName = depuratorFlagIdx !== -1 ? args[depuratorFlagIdx + 1] : null;
+const browserName = args.find((a, i) => i !== depuratorFlagIdx && i !== depuratorFlagIdx + 1 && !a.startsWith('-')) || 'chrome';
 const driver = getDriver(browserName);
 
 const profilePath = ensureActiveProfilePath();
@@ -14,11 +17,18 @@ const COLLECTED_FILE = join(profilePath, 'collected_groups.json');
 const MESSAGE_FILE = join(profilePath, 'message.json');
 const imgsDir = join(profilePath, 'imgs');
 
-const grups_urls = existsSync(COLLECTED_FILE)
+const collectedGroups = existsSync(COLLECTED_FILE)
   ? JSON.parse(readFileSync(COLLECTED_FILE, 'utf-8'))
-      .filter(g => g.approved !== false)
-      .map(g => g.url)
   : [];
+
+const grups_urls = collectedGroups
+  .filter(g => g.approved !== false)
+  .filter(g => !depuratorName || g.depuration?.depurators?.[depuratorName]?.passed === true)
+  .map(g => g.url);
+
+if (depuratorName) {
+  console.log(`🔍 Filtrando por depurador "${depuratorName}" (solo passed === true, sin recomputar)`);
+}
 
 const message = existsSync(MESSAGE_FILE)
   ? JSON.parse(readFileSync(MESSAGE_FILE, 'utf-8')).text
