@@ -137,6 +137,9 @@ function evaluateStatement(statement, group) {
   const values = Array.isArray(rawValue) ? rawValue : [rawValue];
   if (values.length === 0) return false;
 
+  // excludes: si al menos uno de los valores está en el texto → false
+  if (operation === 'excludes') return values.every(compare);
+
   return values.some(compare);
 }
 
