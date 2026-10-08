@@ -109,27 +109,35 @@ function initDepuration() {
 function evaluateStatement(statement, group) {
   const target = statement.target || 'name';
   const operation = statement.operation || 'includes';
-  const value = statement.value || '';
-  const groupValue = group[target] ? group[target].toString().toLowerCase() : '';
-  const searchValue = value.toLowerCase();
+  const rawValue = statement.value ?? '';
+  const groupValue = group[target] ? group[target].toString() : '';
+  const groupLower = groupValue.toLowerCase();
 
-  switch (operation) {
-    case 'includes':
-      return groupValue.includes(searchValue);
-    case 'excludes':
-      return !groupValue.includes(searchValue);
-    case 'whole_word':
-      const safeValue = value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      return new RegExp(`\\b${safeValue}\\b`, 'i').test(group[target] || '');
-    case 'regex':
-      try {
-        return new RegExp(value).test(group[target] || '');
-      } catch {
+  const compare = (value) => {
+    const searchValue = String(value).toLowerCase();
+    switch (operation) {
+      case 'includes':
+        return groupLower.includes(searchValue);
+      case 'excludes':
+        return !groupLower.includes(searchValue);
+      case 'whole_word':
+        const safeValue = String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        return new RegExp(`\\b${safeValue}\\b`, 'i').test(groupValue);
+      case 'regex':
+        try {
+          return new RegExp(value).test(groupValue);
+        } catch {
+          return false;
+        }
+      default:
         return false;
-      }
-    default:
-      return false;
-  }
+    }
+  };
+
+  const values = Array.isArray(rawValue) ? rawValue : [rawValue];
+  if (values.length === 0) return false;
+
+  return values.some(compare);
 }
 
 function evaluateRuleAST(ruleObj, group, statementsData) {
