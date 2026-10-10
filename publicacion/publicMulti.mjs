@@ -6,6 +6,7 @@ import { isVisited, markVisited, markVisitedOnError } from './groupTrace.mjs';
 import {
   sleep,
   randomBetween,
+  parseCliArgs,
   waitForElement,
   waitForElementToDisappear,
   waitForHandleToDisappear,
@@ -14,11 +15,19 @@ import {
 } from './utils.mjs';
 import { ensureActiveProfilePath } from './profileManager.mjs';
 
-const args = process.argv.slice(2);
-const depuratorFlagIdx = args.findIndex(a => a === '-depurator' || a === '--depurator');
-const depuratorName = depuratorFlagIdx !== -1 ? args[depuratorFlagIdx + 1] : null;
-const browserName = args.find((a, i) => i !== depuratorFlagIdx && i !== depuratorFlagIdx + 1 && !a.startsWith('-')) || 'chrome';
+const { flags, positional } = parseCliArgs(process.argv.slice(2));
+const depuratorName = flags.depurator ?? null;
+const browserName = positional[0] || 'chrome';
 const driver = getDriver(browserName);
+
+let batchLimit = null;
+if (flags['batch-limit'] != null) {
+  batchLimit = Number.parseInt(flags['batch-limit'], 10);
+  if (!Number.isFinite(batchLimit) || batchLimit < 0) {
+    console.error(`❌ -batch-limit inválido: "${flags['batch-limit']}"`);
+    process.exit(1);
+  }
+}
 
 const profilePath = ensureActiveProfilePath();
 const COLLECTED_FILE = join(profilePath, 'collected_groups.json');
@@ -413,10 +422,15 @@ async function main() {
   const remaining = [...pending];
   const capacity = Math.max(params.BATCH_SIZE - 1, 0);
 
-  console.log(`\n[2/3] ${remaining.length} pendientes | hasta ${capacity} grupo(s) adicionale(s) por publicación`);
+  console.log(`\n[2/3] ${remaining.length} pendientes | hasta ${capacity} grupo(s) adicionale(s) por publicación${batchLimit != null ? ` | límite: ${batchLimit} batch(es)` : ''}`);
 
   let round = 0;
   while (remaining.length > 0) {
+    if (batchLimit != null && round >= batchLimit) {
+      console.log(`\n  Límite de ${batchLimit} batch(es) alcanzado, se corta acá (quedan ${remaining.length} pendientes para la próxima corrida)`);
+      break;
+    }
+
     round++;
     const anchor = remaining.shift();
     console.log(`\n--- Ronda ${round} | quedan ${remaining.length} ---`);
@@ -436,7 +450,7 @@ async function main() {
       console.log(`  ❌ Falló el ancla "${anchor.name}" (${consumed.length} adicionales quemados igual para esta corrida, sin marcar en visited.json)`);
     }
 
-    if (remaining.length > 0) {
+    if (remaining.length > 0 && (batchLimit == null || round < batchLimit)) {
       const delay = params.REST_BETWEEN_BATCHES;
       console.log(`  Descansando ${(delay / 1000).toFixed(0)}s...`);
       await sleep(delay);

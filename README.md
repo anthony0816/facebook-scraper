@@ -50,19 +50,35 @@ pnpm public:chrome     # Chrome
 pnpm public:edge       # Edge
 ```
 
-Para publicar solo en los grupos que pasaron un depurador específico (según el campo `depuration.depurators.<nombre>.passed` ya guardado en `collected_groups.json` — no se recomputa nada en tiempo real; un grupo sin esa estructura o con `passed: false` se omite):
+Acepta flags opcionales (recordá anteponer `--` para que pnpm se las pase al script en vez de interpretarlas él mismo):
+
+- `-depurator <nombre>`: publica solo en los grupos que pasaron ese depurador (según el campo `depuration.depurators.<nombre>.passed` ya guardado en `collected_groups.json` — no se recomputa nada en tiempo real; un grupo sin esa estructura o con `passed: false` se omite).
+- `-group-limit <n>`: tope de grupos pendientes a publicar en esta corrida (si quedan menos de `n`, corre con los que hay; si quedan más, corta ahí — los que no entraron quedan para la próxima corrida).
 
 ```powershell
 pnpm public:chrome -- -depurator <nombre>
+pnpm public:chrome -- -group-limit 5
+pnpm public:chrome -- -depurator <nombre> -group-limit 5
 ```
 
 ### Publicación multi-grupo (compositor nativo)
 
-Usa el modal "Añadir grupos" de Facebook para publicar en hasta 10 grupos a la vez con el mismo mensaje e imágenes. Agrupa por nombre para manejar duplicados, busca por nombre exacto, y publica en lotes dinámicos.
+Usa el modal "Añadir grupos" de Facebook para publicar en hasta 10 grupos a la vez (1 ancla + hasta 9 adicionales) con el mismo mensaje e imágenes. Entra al primer grupo pendiente como ancla, busca ahí mismo por nombre los demás pendientes en el buscador del modal, los marca, y publica en todos de una — repite con el siguiente ancla hasta agotar la lista de pendientes.
 
 ```powershell
 pnpm public:multi           # Chrome (por defecto)
 pnpm public:multi:edge      # Edge
+```
+
+Acepta las mismas flags que la publicación secuencial, más un límite propio de rondas:
+
+- `-depurator <nombre>`: igual que en `public` — solo considera grupos que pasaron ese depurador.
+- `-batch-limit <n>`: corta después de completar `n` rondas (cada ronda es una publicación con su ancla + adicionales), sin importar cuántos pendientes queden — quedan para la próxima corrida.
+
+```powershell
+pnpm public:multi -- -depurator <nombre>
+pnpm public:multi -- -batch-limit 2
+pnpm public:multi -- -depurator <nombre> -batch-limit 2
 ```
 
 ### Colectar URLs de grupos

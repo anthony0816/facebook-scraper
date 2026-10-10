@@ -42,6 +42,30 @@ export async function waitForHandleToDisappear(handle, maxRetries = params.MAX_T
   return waitForHandleToDisappear(handle, maxRetries - 1, delay);
 }
 
+// Parsea argv estilo `-flag valor` / `--flag valor` (ambos se normalizan a la
+// misma key, sin guiones) + argumentos posicionales (ej: el nombre del
+// navegador). Cada flag reconocido consume el siguiente argumento como su
+// valor. Evita los bugs de hacer matching por índice a mano (ej: calcular
+// "el argumento que no es ni el flag ni su valor" se rompe fácil cuando el
+// flag no está presente).
+export function parseCliArgs(argv) {
+  const flags = {};
+  const positional = [];
+
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg.startsWith('-')) {
+      const key = arg.replace(/^--?/, '');
+      flags[key] = argv[i + 1];
+      i++;
+    } else {
+      positional.push(arg);
+    }
+  }
+
+  return { flags, positional };
+}
+
 export function getAllImages(dir) {
   return readdirSync(dir)
     .filter(f => /\.(jpe?g|png|gif|webp)$/i.test(f))

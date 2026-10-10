@@ -2,16 +2,23 @@ import { getDriver } from '../drivers/index.mjs';
 import { readFileSync, existsSync } from 'fs';
 import { params } from './public_params.mjs';
 import { isVisited, markVisited, markVisitedOnError } from './groupTrace.mjs';
-import { sleep, randomBetween, waitForElement, waitForElementToDisappear, waitForHandleToDisappear, getAllImages, goto } from './utils.mjs';
+import { sleep, randomBetween, parseCliArgs, waitForElement, waitForElementToDisappear, waitForHandleToDisappear, getAllImages, goto } from './utils.mjs';
 import { join } from 'path';
 import { ensureActiveProfilePath } from './profileManager.mjs';
 
-//todo this does not work well when i execute pnpm public:edge with no depurator y launches with chrome
-const args = process.argv.slice(2);
-const depuratorFlagIdx = args.findIndex(a => a === '-depurator' || a === '--depurator');
-const depuratorName = depuratorFlagIdx !== -1 ? args[depuratorFlagIdx + 1] : null;
-const browserName = args.find((a, i) => i !== depuratorFlagIdx && i !== depuratorFlagIdx + 1 && !a.startsWith('-')) || 'chrome';
+const { flags, positional } = parseCliArgs(process.argv.slice(2));
+const depuratorName = flags.depurator ?? null;
+const browserName = positional[0] || 'chrome';
 const driver = getDriver(browserName);
+
+let groupLimit = null;
+if (flags['group-limit'] != null) {
+  groupLimit = Number.parseInt(flags['group-limit'], 10);
+  if (!Number.isFinite(groupLimit) || groupLimit < 0) {
+    console.error(`❌ -group-limit inválido: "${flags['group-limit']}"`);
+    process.exit(1);
+  }
+}
 
 const profilePath = ensureActiveProfilePath();
 const COLLECTED_FILE = join(profilePath, 'collected_groups.json');
@@ -29,6 +36,31 @@ const grups_urls = collectedGroups
 
 if (depuratorName) {
   console.log(`🔍 Filtrando por depurador "${depuratorName}" (solo passed === true, sin recomputar)`);
+}
+
+// Mismo criterio de "ya manejado" que antes: sin error se da por publicado, y el
+// error 'not_public_button_found' también se considera resuelto/no reintentable
+// (otros errores, como 'no_text_editor_found', sí se vuelven a intentar).
+function isHandled(url) {
+  return isVisited(url, (row) => {
+    if (!row.error) return true;
+    if (row.error === 'not_public_button_found') return true;
+    return false;
+  });
+}
+
+const alreadyHandled = grups_urls.filter(u => u && isHandled(u.trim()));
+if (alreadyHandled.length > 0) {
+  console.log(`✔️  Ya publicados (${alreadyHandled.length}):`);
+  alreadyHandled.forEach(u => console.log(`  ${u}`));
+}
+
+let targetUrls = grups_urls
+  .map(u => u && u.trim())
+  .filter(u => u && !isHandled(u));
+
+if (groupLimit != null) {
+  targetUrls = targetUrls.slice(0, groupLimit);
 }
 
 const message = existsSync(MESSAGE_FILE)
@@ -201,29 +233,12 @@ async function main() {
   console.log('[2/4] Creando página...');
   const page = await context.newPage();
 
-  console.log(`[3/4] Grupos a publicar: ${grups_urls.length}`);
+  console.log(`[3/4] Grupos a publicar: ${targetUrls.length}${groupLimit != null ? ` (límite: ${groupLimit})` : ''}`);
 
-  for (let i = 0; i < grups_urls.length; i++) {
-    const url = grups_urls[i].trim();
-    if (!url) continue;
+  for (let i = 0; i < targetUrls.length; i++) {
+    const url = targetUrls[i];
 
-    let withError = ''
-    if (isVisited(url, (row)=> {
-      if (!row.error) return true
-      if (
-        row.error == 'not_public_button_found' 
-        // || 
-        // row.error == 'no_text_editor_found'
-      ){
-        withError =  row.error
-        return true
-      }
-    })) {
-      console.log(`\n--- Grupo ${i + 1}/${grups_urls.length} --- ⏭️ Ya publicado${withError !== '' ? ` ,❌ con error : ${withError}, url: ${url}` : '' }`);
-      continue;
-    }
-
-    console.log(`\n--- Grupo ${i + 1}/${grups_urls.length} ---`);
+    console.log(`\n--- Grupo ${i + 1}/${targetUrls.length} ---`);
     const {success, error} = await postToGroup(page, url);
 
     if (success) {
@@ -232,10 +247,10 @@ async function main() {
     if(error){
       if(error == 'not_public_button_found')  markVisitedOnError(url, error)
       if(error == 'no_text_editor_found') markVisitedOnError(url, error)
-      
+
     }
 
-    if (i < grups_urls.length - 1) {
+    if (i < targetUrls.length - 1) {
       const delay = randomBetween(params.POST_INTERVAL_MIN, params.POST_INTERVAL_MAX);
       console.log(`  Esperando ${(delay / 1000).toFixed(0)}s antes del próximo grupo...`);
       await sleep(delay);
