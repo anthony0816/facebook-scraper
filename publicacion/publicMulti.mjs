@@ -5,6 +5,7 @@ import { params } from './public_params.mjs';
 import { isVisited, markVisited, markVisitedOnError } from './groupTrace.mjs';
 import {
   sleep,
+  randomBetween,
   waitForElement,
   waitForElementToDisappear,
   waitForHandleToDisappear,
@@ -153,13 +154,21 @@ async function pasteSearch(page, groupName) {
 // buscado. El checkbox real está varios niveles de div por encima del span, dentro
 // de un contenedor con role="none" (no role="button"), por eso se sube por
 // parentElement hasta encontrarlo en vez de clickear el span o la card entera.
+//
+// El click() es síncrono pero React confirma el estado real (aria-checked) de
+// forma asíncrona en su próximo render. Si se hacen varios clicks seguidos sobre
+// filas que resultan ser duplicados fantasma de la virtualización de la lista,
+// solo uno termina realmente marcado — por eso no se cuenta cuántos .click() se
+// llamaron, sino cuántos quedaron de verdad en aria-checked="true" después de
+// darle un respiro a React para reconciliar.
 async function attemptSelectMatches(page, lowerName, maxToSelect) {
-  return page.evaluate(({ name, max }) => {
+  return page.evaluate(async ({ name, max }) => {
     const spans = document.querySelectorAll('div[role="dialog"] span');
-    const clickedBoxes = new Set();
+    const candidates = [];
+    const seen = new Set();
 
     for (const span of spans) {
-      if (clickedBoxes.size >= max) break;
+      if (candidates.length >= max) break;
       if (span.textContent.trim().toLowerCase() !== name) continue;
 
       let p = span;
@@ -170,14 +179,20 @@ async function attemptSelectMatches(page, lowerName, maxToSelect) {
         cb = p.querySelector('input[type="checkbox"]');
         if (cb) break;
       }
-      if (!cb || clickedBoxes.has(cb)) continue;
+      if (!cb || seen.has(cb)) continue;
       if (cb.getAttribute('aria-checked') !== 'false') continue;
 
-      cb.click();
-      clickedBoxes.add(cb);
+      seen.add(cb);
+      candidates.push(cb);
     }
 
-    return clickedBoxes.size;
+    for (const cb of candidates) {
+      cb.click();
+    }
+
+    await new Promise(r => setTimeout(r, 400));
+
+    return candidates.filter(cb => cb.getAttribute('aria-checked') === 'true').length;
   }, { name: lowerName, max: maxToSelect });
 }
 
@@ -185,12 +200,14 @@ async function attemptSelectMatches(page, lowerName, maxToSelect) {
 // así que en vez de dormir un tiempo arbitrario, reintenta el click-evaluate
 // (mismo patrón que waitForElement) hasta que aparezca un match real o se agoten
 // los reintentos — rápido cuando Facebook responde rápido, con margen cuando no.
-async function pollForMatches(page, lowerName, maxToSelect, retries, delay) {
+// El delay entre reintentos se randomiza (GROUP_SEARCH_POLL_DELAY_MIN/MAX_MS)
+// para que el ritmo entre búsquedas no sea siempre el mismo número exacto.
+async function pollForMatches(page, lowerName, maxToSelect, retries) {
   const clicked = await attemptSelectMatches(page, lowerName, maxToSelect);
   if (clicked > 0) return clicked;
   if (retries <= 0) return 0;
-  await sleep(delay);
-  return pollForMatches(page, lowerName, maxToSelect, retries - 1, delay);
+  await sleep(randomBetween(params.GROUP_SEARCH_POLL_DELAY_MIN_MS, params.GROUP_SEARCH_POLL_DELAY_MAX_MS));
+  return pollForMatches(page, lowerName, maxToSelect, retries - 1);
 }
 
 // Busca `groupName` en el modal "Añadir grupos" y marca, de una sola búsqueda,
@@ -202,13 +219,50 @@ async function selectExactMatchesInModal(
   groupName,
   maxToSelect,
   retries = params.GROUP_SEARCH_MAX_RETRIES,
-  delay = params.GROUP_SEARCH_POLL_DELAY_MS,
 ) {
   const searchInput = await pasteSearch(page, groupName);
   if (!searchInput) return 0;
 
   const lowerName = groupName.toLowerCase().trim();
-  return pollForMatches(page, lowerName, maxToSelect, retries, delay);
+  return pollForMatches(page, lowerName, maxToSelect, retries);
+}
+
+// Cuando se marca una card, Facebook la agrega como "chip" a una bandeja de
+// seleccionados (botón con aria-label "Suprimir <nombre> de la lista para
+// compartir" / "Remove <name> from the list to share") que es PERSISTENTE —
+// a diferencia de la lista de resultados de búsqueda (que se reemplaza con cada
+// búsqueda nueva y hace desaparecer cards ya marcadas de búsquedas anteriores),
+// esta bandeja sobrevive mientras el campo de búsqueda esté vacío. Por eso es la
+// única fuente confiable para saber "cuántos llevo marcados en total" y "cuáles
+// son exactamente" — el aria-label además trae el nombre completo sin el recorte
+// visual (line-clamp) que tiene el texto del chip en pantalla.
+async function getSelectedChipNames(page) {
+  const input = await page.$(
+    'div[role="dialog"] input[type="search"], ' +
+    'div[role="dialog"] input[placeholder*="buscar" i], ' +
+    'div[role="dialog"] input[placeholder*="search" i]'
+  );
+  if (input) {
+    await input.fill('');
+    await sleep(300);
+  }
+
+  return page.evaluate(() => {
+    const chips = document.querySelectorAll(
+      'div[role="dialog"] [aria-label^="Suprimir "], div[role="dialog"] [aria-label^="Remove "]'
+    );
+    const names = [];
+    for (const chip of chips) {
+      const label = chip.getAttribute('aria-label') || '';
+      const match =
+        label.match(/^Suprimir (.+) de la lista para compartir$/) ||
+        label.match(/^Remove (.+) from the list to share$/i);
+      if (match) {
+        names.push(match[1].trim());
+      }
+    }
+    return names;
+  });
 }
 
 async function clickBack(page) {
@@ -239,13 +293,14 @@ async function clickPublish(page) {
   return false;
 }
 
-// Publica partiendo de `anchor` como grupo ancla, y va consumiendo en vivo de
-// `remaining` (misma referencia que usa main(), se le hace splice in-place) hasta
-// `capacity` grupos adicionales, buscándolos uno por uno por nombre en el modal
-// "Añadir grupos". Un grupo se considera "quemado" (sacado de `remaining`) en el
-// instante en que se marca su card en el modal, sin importar si la publicación
-// final tiene éxito o no — por eso solo se persiste en visited.json cuando
-// `success` es true.
+// Publica partiendo de `anchor` como grupo ancla, buscando en el modal "Añadir
+// grupos" (uno por uno, por nombre) hasta `capacity` grupos adicionales de
+// `remaining`. El tope y la lista final de consumidos se leen de la bandeja de
+// chips de seleccionados (getSelectedChipNames), no de lo que cada búsqueda cree
+// haber marcado. Esos grupos quedan "quemados" — sacados de `remaining` (misma
+// referencia que usa main(), se le hace splice in-place) — sin importar si la
+// publicación final tiene éxito o no; por eso solo se persiste en visited.json
+// cuando `success` es true.
 async function postDynamicBatch(page, anchor, remaining, capacity) {
   console.log(`  Navegando a: ${anchor.url}`);
   await goto(page, anchor.url, params.MAX_NAVEGATION_RETRIES);
@@ -285,38 +340,42 @@ async function postDynamicBatch(page, anchor, remaining, capacity) {
     return { success: false, consumed: [] };
   }
 
-  const consumed = [];
+  // "Cuántos llevo" y "cuáles son" se leen de la bandeja de chips de
+  // seleccionados (getSelectedChipNames), no de lo que cada búsqueda cree haber
+  // marcado — esa bandeja es la única vista persistente que no se destruye al
+  // cambiar de búsqueda.
   const uniqueNames = [...new Set(remaining.map(g => g.name.toLowerCase().trim()))];
 
   for (const name of uniqueNames) {
-    if (consumed.length >= capacity) break;
+    const selectedSoFar = await getSelectedChipNames(page);
+    if (selectedSoFar.length >= capacity) {
+      console.log(`  Tope de ${capacity} alcanzado (${selectedSoFar.length} chips), no se buscan más nombres`);
+      break;
+    }
 
-    const matchIdxs = [];
-    remaining.forEach((g, i) => {
-      if (g.name.toLowerCase().trim() === name) matchIdxs.push(i);
-    });
-    if (matchIdxs.length === 0) continue;
+    const matchCount = remaining.filter(g => g.name.toLowerCase().trim() === name).length;
+    if (matchCount === 0) continue;
 
-    const slotsLeft = capacity - consumed.length;
-    const wanted = Math.min(matchIdxs.length, slotsLeft);
+    const wanted = Math.min(matchCount, capacity - selectedSoFar.length);
 
     console.log(`  Buscando "${name}"...`);
     const clicked = await selectExactMatchesInModal(page, name, wanted);
-    if (clicked === 0) {
-      console.log(`    sin match en el modal, se omite por esta ronda`);
-      continue;
-    }
-
-    const toConsume = Math.min(clicked, wanted);
-    const idxsToRemove = matchIdxs.slice(0, toConsume).sort((a, b) => b - a);
-    for (const idx of idxsToRemove) {
-      consumed.push(remaining[idx]);
-      remaining.splice(idx, 1);
-    }
-    console.log(`    ✅ ${toConsume} marcado(s)`);
+    console.log(clicked > 0 ? `    ✅ ${clicked} marcado(s)` : `    sin match en el modal, se omite`);
   }
 
-  console.log(`  ${consumed.length} grupos adicionales marcados`);
+  // Barrido final por chips: esto es lo que realmente quedó seleccionado, así
+  // que es lo que se saca de `remaining` para no volver a ofrecerlo después.
+  const finalSelectedNames = await getSelectedChipNames(page);
+  const consumed = [];
+  for (const selectedName of finalSelectedNames) {
+    const lowerSelected = selectedName.toLowerCase().trim();
+    const idx = remaining.findIndex(g => g.name.toLowerCase().trim() === lowerSelected);
+    if (idx === -1) continue;
+    consumed.push(remaining[idx]);
+    remaining.splice(idx, 1);
+  }
+
+  console.log(`  ${consumed.length} grupos adicionales confirmados por los chips de seleccionados`);
 
   console.log(`  Cerrando modal (Atrás)...`);
   await clickBack(page);
@@ -345,23 +404,33 @@ async function main() {
   const context = await driver.launch();
   const page = await context.newPage();
 
+  const alreadyPublished = allGroups.filter(g => isVisited(g.url, r => r?.status === 'success'));
+  if (alreadyPublished.length > 0) {
+    console.log(`\n✔️  Ya publicados (${alreadyPublished.length}):`);
+    alreadyPublished.forEach(g => console.log(`  ${g.name} - ${g.url}`));
+  }
+
   const remaining = [...pending];
   const capacity = Math.max(params.BATCH_SIZE - 1, 0);
 
-  console.log(`[2/3] ${remaining.length} pendientes | hasta ${capacity} grupo(s) adicionale(s) por publicación`);
+  console.log(`\n[2/3] ${remaining.length} pendientes | hasta ${capacity} grupo(s) adicionale(s) por publicación`);
 
   let round = 0;
   while (remaining.length > 0) {
     round++;
     const anchor = remaining.shift();
-    console.log(`\n--- Ronda ${round} | Ancla: ${anchor.name} (${anchor.url}) | quedan ${remaining.length} ---`);
+    console.log(`\n--- Ronda ${round} | quedan ${remaining.length} ---`);
+    console.log(`  Grupo (ancla): ${anchor.name} - ${anchor.url}`);
 
     const { success, consumed } = await postDynamicBatch(page, anchor, remaining, capacity);
 
     if (success) {
       markVisited(anchor.url);
       for (const g of consumed) markVisited(g.url);
-      console.log(`  ✅ Publicado: "${anchor.name}" + ${consumed.length} adicional(es)`);
+
+      const publishedGroups = [anchor, ...consumed];
+      console.log(`\n✅ Publicación exitosa para grupos (${publishedGroups.length}):`);
+      publishedGroups.forEach(g => console.log(`  ${g.name} - ${g.url}`));
     } else {
       markVisitedOnError(anchor.url, 'multi_anchor_failed');
       console.log(`  ❌ Falló el ancla "${anchor.name}" (${consumed.length} adicionales quemados igual para esta corrida, sin marcar en visited.json)`);
