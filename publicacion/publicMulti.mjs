@@ -1,12 +1,22 @@
 import { getDriver } from '../drivers/index.mjs';
-import { readFileSync, existsSync, writeFileSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { params } from './public_params.mjs';
 import { isVisited, markVisited, markVisitedOnError } from './groupTrace.mjs';
-import { sleep, randomBetween, waitForElement, getAllImages, goto, waitForSearchResults } from './utils.mjs';
-import { ensureActiveProfilePath, getActiveProfileName } from './profileManager.mjs';
+import {
+  sleep,
+  waitForElement,
+  waitForElementToDisappear,
+  waitForHandleToDisappear,
+  getAllImages,
+  goto,
+} from './utils.mjs';
+import { ensureActiveProfilePath } from './profileManager.mjs';
 
-const browserName = process.argv[2] || 'chrome';
+const args = process.argv.slice(2);
+const depuratorFlagIdx = args.findIndex(a => a === '-depurator' || a === '--depurator');
+const depuratorName = depuratorFlagIdx !== -1 ? args[depuratorFlagIdx + 1] : null;
+const browserName = args.find((a, i) => i !== depuratorFlagIdx && i !== depuratorFlagIdx + 1 && !a.startsWith('-')) || 'chrome';
 const driver = getDriver(browserName);
 
 const profilePath = ensureActiveProfilePath();
@@ -25,43 +35,16 @@ const message = existsSync(MESSAGE_FILE)
   ? JSON.parse(readFileSync(MESSAGE_FILE, 'utf-8')).text
   : '';
 
+if (depuratorName) {
+  console.log(`🔍 Filtrando por depurador "${depuratorName}" (solo passed === true, sin recomputar)`);
+}
+
 const pending = allGroups.filter(g =>
-  g.approved !== false && !isVisited(g.url, r => r?.status === 'success')
+  g.approved !== false &&
+  (!depuratorName || g.depuration?.depurators?.[depuratorName]?.passed === true) &&
+  !isVisited(g.url, r => r?.status === 'success')
 );
 console.log(`  ${allGroups.length} en collected_groups.json, ${pending.length} pendientes`);
-
-const nameCount = new Map();
-for (const g of pending) {
-  const key = g.name.toLowerCase();
-  nameCount.set(key, (nameCount.get(key) || 0) + 1);
-}
-
-const dupGroups = [];
-const uniqueGroups = [];
-for (const g of pending) {
-  const key = g.name.toLowerCase();
-  if (nameCount.get(key) >= 2) {
-    dupGroups.push(g);
-  } else {
-    uniqueGroups.push(g);
-  }
-}
-
-const batches = [];
-const byName = new Map();
-for (const g of dupGroups) {
-  const key = g.name.toLowerCase();
-  if (!byName.has(key)) byName.set(key, []);
-  byName.get(key).push(g);
-}
-for (const [, gs] of byName) {
-  for (let i = 0; i < gs.length; i += params.BATCH_SIZE) {
-    batches.push(gs.slice(i, i + params.BATCH_SIZE));
-  }
-}
-for (let i = 0; i < uniqueGroups.length; i += params.BATCH_SIZE) {
-  batches.push(uniqueGroups.slice(i, i + params.BATCH_SIZE));
-}
 
 async function openComposer(page) {
   const sel = 'div[role="button"]:has-text("Escribe")';
@@ -84,12 +67,12 @@ async function writeText(page) {
     page,
     'div[role="dialog"] div[contenteditable="true"][data-lexical-editor="true"]',
   );
-  if (!editor) return false;
+  if (!editor) return null;
 
   await editor.click();
   await sleep(1500);
   await page.keyboard.type(message, { delay: 10 });
-  return true;
+  return editor;
 }
 
 async function uploadImages(page) {
@@ -143,7 +126,10 @@ async function clickAddGroups(page) {
   });
 }
 
-async function searchAndClear(page, groupName) {
+// Pega el texto completo de una sola vez (no tecla por tecla, para no disparar
+// un request de búsqueda por cada letra): borra de golpe con fill('') y pega el
+// nombre completo de golpe con fill(groupName).
+async function pasteSearch(page, groupName) {
   const input = await page.$(
     'div[role="dialog"] input[type="search"], ' +
     'div[role="dialog"] input[placeholder*="buscar" i], ' +
@@ -152,71 +138,77 @@ async function searchAndClear(page, groupName) {
   if (!input) return null;
 
   await input.click();
-  await sleep(300);
-  await page.keyboard.press('Control+a');
-  await sleep(200);
-  await page.keyboard.press('Delete');
-  await sleep(300);
-  await page.keyboard.type(groupName, { delay: 20 });
+  await input.fill('');
+  await sleep(150);
+  await input.fill(groupName);
 
   return input;
 }
 
-async function selectGroupsInModal(page, groupName) {
-  const lowerName = groupName.toLowerCase();
-  const searchInput = await searchAndClear(page, groupName);
-  if (!searchInput) return 0;
+// Una sola pasada: busca en el DOM actual spans con match EXACTO de `name` y hace
+// click en el checkbox de hasta `max` cards sin marcar todavía. El nombre del grupo
+// vive en un <span> propio (sin mezclarse con texto extra como "Última visita:
+// ..."), así que el match se hace sobre esos spans — no sobre el textContent de
+// toda la card, que sí incluye ese texto adicional y nunca sería igual al nombre
+// buscado. El checkbox real está varios niveles de div por encima del span, dentro
+// de un contenedor con role="none" (no role="button"), por eso se sube por
+// parentElement hasta encontrarlo en vez de clickear el span o la card entera.
+async function attemptSelectMatches(page, lowerName, maxToSelect) {
+  return page.evaluate(({ name, max }) => {
+    const spans = document.querySelectorAll('div[role="dialog"] span');
+    const clickedBoxes = new Set();
 
-  await waitForSearchResults(page, groupName);
+    for (const span of spans) {
+      if (clickedBoxes.size >= max) break;
+      if (span.textContent.trim().toLowerCase() !== name) continue;
 
-  const clicked = await page.evaluate((name) => {
-    const items = document.querySelectorAll(
-      'div[role="dialog"] div[role="button"], ' +
-      'div[role="dialog"] [role="listitem"], ' +
-      'div[role="dialog"] div.x9f619'
-    );
-    let count = 0;
-    for (const item of items) {
-      if (!item.textContent.toLowerCase().includes(name)) continue;
-      const cb = item.querySelector('input[type="checkbox"]');
-      if (!cb || cb.getAttribute('aria-checked') !== 'false') continue;
-      item.click();
-      count++;
+      let p = span;
+      let cb = null;
+      for (let i = 0; i < 12; i++) {
+        p = p.parentElement;
+        if (!p) break;
+        cb = p.querySelector('input[type="checkbox"]');
+        if (cb) break;
+      }
+      if (!cb || clickedBoxes.has(cb)) continue;
+      if (cb.getAttribute('aria-checked') !== 'false') continue;
+
+      cb.click();
+      clickedBoxes.add(cb);
     }
-    return count;
-  }, lowerName);
 
-  return clicked;
+    return clickedBoxes.size;
+  }, { name: lowerName, max: maxToSelect });
 }
 
-async function selectNamesInModal(page, names) {
-  let selected = 0;
-  for (const name of names) {
-    const searchInput = await searchAndClear(page, name);
-    if (!searchInput) continue;
-    await waitForSearchResults(page, name);
+// El tiempo que tarda Facebook en traer y renderizar los resultados no es fijo,
+// así que en vez de dormir un tiempo arbitrario, reintenta el click-evaluate
+// (mismo patrón que waitForElement) hasta que aparezca un match real o se agoten
+// los reintentos — rápido cuando Facebook responde rápido, con margen cuando no.
+async function pollForMatches(page, lowerName, maxToSelect, retries, delay) {
+  const clicked = await attemptSelectMatches(page, lowerName, maxToSelect);
+  if (clicked > 0) return clicked;
+  if (retries <= 0) return 0;
+  await sleep(delay);
+  return pollForMatches(page, lowerName, maxToSelect, retries - 1, delay);
+}
 
-    const clicked = await page.evaluate((n) => {
-      const spans = document.querySelectorAll('div[role="dialog"] span');
-      for (const span of spans) {
-        if (span.textContent.trim().toLowerCase() !== n.toLowerCase()) continue;
-        let p = span;
-        for (let i = 0; i < 10; i++) {
-          p = p.parentElement;
-          if (!p) break;
-          const cb = p.querySelector('input[type="checkbox"]');
-          if (cb && cb.getAttribute('aria-checked') === 'false') {
-            cb.click();
-            return true;
-          }
-        }
-      }
-      return false;
-    }, name);
+// Busca `groupName` en el modal "Añadir grupos" y marca, de una sola búsqueda,
+// hasta `maxToSelect` cards que matcheen exacto y sigan sin marcar. Soporta
+// duplicados (mismo nombre, distinta URL real) porque Facebook puede mostrar
+// varias cards para un mismo texto buscado.
+async function selectExactMatchesInModal(
+  page,
+  groupName,
+  maxToSelect,
+  retries = params.GROUP_SEARCH_MAX_RETRIES,
+  delay = params.GROUP_SEARCH_POLL_DELAY_MS,
+) {
+  const searchInput = await pasteSearch(page, groupName);
+  if (!searchInput) return 0;
 
-    if (clicked) selected++;
-  }
-  return selected;
+  const lowerName = groupName.toLowerCase().trim();
+  return pollForMatches(page, lowerName, maxToSelect, retries, delay);
 }
 
 async function clickBack(page) {
@@ -247,21 +239,30 @@ async function clickPublish(page) {
   return false;
 }
 
-async function postBatch(page, batch) {
-  const firstUrl = batch[0].url;
-  const sameName = batch.every(g => g.name.toLowerCase() === batch[0].name.toLowerCase());
-
-  console.log(`  Navegando a: ${firstUrl}`);
-  await goto(page, firstUrl, params.MAX_NAVEGATION_RETRIES);
+// Publica partiendo de `anchor` como grupo ancla, y va consumiendo en vivo de
+// `remaining` (misma referencia que usa main(), se le hace splice in-place) hasta
+// `capacity` grupos adicionales, buscándolos uno por uno por nombre en el modal
+// "Añadir grupos". Un grupo se considera "quemado" (sacado de `remaining`) en el
+// instante en que se marca su card en el modal, sin importar si la publicación
+// final tiene éxito o no — por eso solo se persiste en visited.json cuando
+// `success` es true.
+async function postDynamicBatch(page, anchor, remaining, capacity) {
+  console.log(`  Navegando a: ${anchor.url}`);
+  await goto(page, anchor.url, params.MAX_NAVEGATION_RETRIES);
 
   console.log(`  Abriendo compositor...`);
   if (!await openComposer(page)) {
-    console.log(`  ❌ No se pudo abrir el compositor en ${firstUrl}`);
-    return { success: false };
+    console.log(`  ❌ No se pudo abrir el compositor en ${anchor.url}`);
+    return { success: false, consumed: [] };
   }
 
   console.log(`  Escribiendo mensaje...`);
-  if (!await writeText(page)) return { success: false };
+  const editor = await writeText(page);
+  if (!editor) return { success: false, consumed: [] };
+
+  const dialogHandle = (await editor.evaluateHandle(
+    el => el.closest('div[role="dialog"]')
+  )).asElement();
 
   console.log(`  Subiendo imágenes...`);
   await uploadImages(page);
@@ -269,7 +270,7 @@ async function postBatch(page, batch) {
   console.log(`  Abriendo "Añadir grupos"...`);
   if (!await clickAddGroups(page)) {
     console.log(`  ❌ No se encontró botón "Añadir grupos"`);
-    return { success: false };
+    return { success: false, consumed: [] };
   }
 
   console.log(`  Esperando a que cargue el modal...`);
@@ -281,21 +282,41 @@ async function postBatch(page, batch) {
   );
   if (!searchInput) {
     console.log(`  ⚠️ No se detectó el campo de búsqueda en el modal`);
-    return { success: false };
+    return { success: false, consumed: [] };
   }
 
-  let selected = 0;
-  if (sameName) {
-    console.log(`  Buscando "${batch[0].name}" en el modal...`);
-    selected = await selectGroupsInModal(page, batch[0].name);
-  } else {
-    const names = batch.slice(1).map(g => g.name);
-    console.log(`  Buscando ${names.length} nombres distintos...`);
-    selected = await selectNamesInModal(page, names);
-  }
-  console.log(`  ${selected} grupos adicionales seleccionados`);
+  const consumed = [];
+  const uniqueNames = [...new Set(remaining.map(g => g.name.toLowerCase().trim()))];
 
-  const actualBatch = [batch[0], ...batch.slice(1, 1 + selected)];
+  for (const name of uniqueNames) {
+    if (consumed.length >= capacity) break;
+
+    const matchIdxs = [];
+    remaining.forEach((g, i) => {
+      if (g.name.toLowerCase().trim() === name) matchIdxs.push(i);
+    });
+    if (matchIdxs.length === 0) continue;
+
+    const slotsLeft = capacity - consumed.length;
+    const wanted = Math.min(matchIdxs.length, slotsLeft);
+
+    console.log(`  Buscando "${name}"...`);
+    const clicked = await selectExactMatchesInModal(page, name, wanted);
+    if (clicked === 0) {
+      console.log(`    sin match en el modal, se omite por esta ronda`);
+      continue;
+    }
+
+    const toConsume = Math.min(clicked, wanted);
+    const idxsToRemove = matchIdxs.slice(0, toConsume).sort((a, b) => b - a);
+    for (const idx of idxsToRemove) {
+      consumed.push(remaining[idx]);
+      remaining.splice(idx, 1);
+    }
+    console.log(`    ✅ ${toConsume} marcado(s)`);
+  }
+
+  console.log(`  ${consumed.length} grupos adicionales marcados`);
 
   console.log(`  Cerrando modal (Atrás)...`);
   await clickBack(page);
@@ -305,10 +326,18 @@ async function postBatch(page, batch) {
   const published = await clickPublish(page);
   if (!published) {
     console.log(`  ❌ No se encontró botón "Publicar"`);
-    return { success: false, actualBatch };
+    return { success: false, consumed };
   }
 
-  return { success: true, actualBatch };
+  console.log(`  Esperando a que se cierre el modal de publicación...`);
+  const modalClosed = dialogHandle
+    ? await waitForHandleToDisappear(dialogHandle, params.MAX_MODAL_CLOSE_SECONDS_AWAIT)
+    : await waitForElementToDisappear(page, 'div[role="dialog"]', params.MAX_MODAL_CLOSE_SECONDS_AWAIT);
+  if (!modalClosed) {
+    console.log(`  ⚠️ El modal no se cerró en el tiempo esperado, continuando de todas formas`);
+  }
+
+  return { success: true, consumed };
 }
 
 async function main() {
@@ -316,40 +345,29 @@ async function main() {
   const context = await driver.launch();
   const page = await context.newPage();
 
-  const dupCount = dupGroups.length;
-  const uniCount = uniqueGroups.length;
-  console.log(`[2/3] ${pending.length} pendientes | ${dupCount} con nombres repetidos, ${uniCount} únicos | ${batches.length} batches`);
+  const remaining = [...pending];
+  const capacity = Math.max(params.BATCH_SIZE - 1, 0);
 
-  for (const [i, b] of batches.entries()) {
-    const label = b.every(g => g.name.toLowerCase() === b[0].name.toLowerCase())
-      ? `"${b[0].name}" (x${b.length})`
-      : `mixto (${b.length} grupos)`;
-    console.log(`  Batch ${i + 1} (${b.length}): ${label}`);
-  }
+  console.log(`[2/3] ${remaining.length} pendientes | hasta ${capacity} grupo(s) adicionale(s) por publicación`);
 
-  for (let b = 0; b < batches.length; b++) {
-    const batch = batches[b];
-    console.log(`\n--- Batch ${b + 1}/${batches.length} ---`);
-    console.log(`  Ancla: ${batch[0].name} (${batch[0].url})`);
+  let round = 0;
+  while (remaining.length > 0) {
+    round++;
+    const anchor = remaining.shift();
+    console.log(`\n--- Ronda ${round} | Ancla: ${anchor.name} (${anchor.url}) | quedan ${remaining.length} ---`);
 
-    const { success, actualBatch } = await postBatch(page, batch);
+    const { success, consumed } = await postDynamicBatch(page, anchor, remaining, capacity);
 
     if (success) {
-      for (const g of actualBatch) {
-        markVisited(g.url);
-      }
-      const remaining = batch.length - actualBatch.length;
-      if (remaining > 0) {
-        console.log(`  ✅ ${actualBatch.length} publicados, ${remaining} sin seleccionar (límite de FB)`);
-      } else {
-        console.log(`  ✅ ${actualBatch.length} publicados`);
-      }
+      markVisited(anchor.url);
+      for (const g of consumed) markVisited(g.url);
+      console.log(`  ✅ Publicado: "${anchor.name}" + ${consumed.length} adicional(es)`);
     } else {
-      console.log(`  ❌ Batch ${b + 1} falló`);
-      markVisitedOnError(batch[0].url, 'multi_anchor_failed');
+      markVisitedOnError(anchor.url, 'multi_anchor_failed');
+      console.log(`  ❌ Falló el ancla "${anchor.name}" (${consumed.length} adicionales quemados igual para esta corrida, sin marcar en visited.json)`);
     }
 
-    if (b < batches.length - 1) {
+    if (remaining.length > 0) {
       const delay = params.REST_BETWEEN_BATCHES;
       console.log(`  Descansando ${(delay / 1000).toFixed(0)}s...`);
       await sleep(delay);
