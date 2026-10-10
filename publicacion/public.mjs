@@ -2,10 +2,11 @@ import { getDriver } from '../drivers/index.mjs';
 import { readFileSync, existsSync } from 'fs';
 import { params } from './public_params.mjs';
 import { isVisited, markVisited, markVisitedOnError } from './groupTrace.mjs';
-import { sleep, randomBetween, waitForElement, getAllImages, goto } from './utils.mjs';
+import { sleep, randomBetween, waitForElement, waitForElementToDisappear, waitForHandleToDisappear, getAllImages, goto } from './utils.mjs';
 import { join } from 'path';
 import { ensureActiveProfilePath } from './profileManager.mjs';
 
+//todo this does not work well when i execute pnpm public:edge with no depurator y launches with chrome
 const args = process.argv.slice(2);
 const depuratorFlagIdx = args.findIndex(a => a === '-depurator' || a === '--depurator');
 const depuratorName = depuratorFlagIdx !== -1 ? args[depuratorFlagIdx + 1] : null;
@@ -85,6 +86,10 @@ const message = existsSync(MESSAGE_FILE)
     console.log(`  ❌ No se pudo encontrar el editor de texto`);
     return {error : 'no_text_editor_found'};
   }
+
+  const dialogHandle = (await lexicalEditor.evaluateHandle(
+    el => el.closest('div[role="dialog"]')
+  )).asElement();
 
   console.log(`  Escribiendo mensaje...`);
   await lexicalEditor.click();
@@ -176,6 +181,14 @@ const message = existsSync(MESSAGE_FILE)
   if (!posted) {
     console.log(`  ⚠️ No se encontró botón de publicar`);
     return {error  : 'not_public_button_found'};
+  }
+
+  console.log(`  Esperando a que se cierre el modal de publicación...`);
+  const modalClosed = dialogHandle
+    ? await waitForHandleToDisappear(dialogHandle, params.MAX_MODAL_CLOSE_SECONDS_AWAIT)
+    : await waitForElementToDisappear(page, 'div[role="dialog"]', params.MAX_MODAL_CLOSE_SECONDS_AWAIT);
+  if (!modalClosed) {
+    console.log(`  ⚠️ El modal no se cerró en el tiempo esperado, continuando de todas formas`);
   }
 
   return {success : true};
