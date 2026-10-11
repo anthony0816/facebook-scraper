@@ -115,6 +115,19 @@ Publicados: 4/6 (66.7%)
   ...
 ```
 
+### Resetear grupos visitados
+
+Limpia el `visited.json` del perfil activo para que los grupos vuelvan a contar como pendientes en `pnpm public`.
+
+```powershell
+pnpm public:reset              # Borra TODO visited.json
+pnpm public:reset -- --errors  # Borra solo los errores reintentables
+```
+
+No pide confirmación: borra directo.
+
+El flag `--errors` es el más útil en el día a día: limpia únicamente los grupos que fallaron y van a reintentarse, sin volver a publicar en los que ya se publicó con éxito. Sigue la misma lógica de `isHandled()` de `public.mjs`: un `error: "not_public_button_found"` **no** se considera reintentable, así que se conserva.
+
 ### Versionado de perfiles
 
 `meta/profiles/` vive fuera de git (es data real, no código), así que no tiene historial propio. Para no perderla, `scripts/profileVersions.mjs` saca snapshots `.zip` a `meta/versions/profile_versions/` — sin dependencias nuevas, usa `Compress-Archive`/`Expand-Archive` de PowerShell.
@@ -143,6 +156,7 @@ facebook-scraper/
 │   ├── public_params.mjs  ← Configuración de tiempos (tuneable)
 │   ├── groupTrace.mjs     ← Control de grupos ya publicados (visited.json)
 │   ├── status.mjs         ← Comandos de estado (count, dedup)
+│   ├── reset.mjs          ← Limpia visited.json del perfil activo
 │   ├── profileManager.mjs ← CRUD de perfiles
 │   ├── profile.mjs        ← CLI de perfiles
 │   └── utils.mjs          ← Utilidades compartidas (sleep, waitForElement, goto, etc.)

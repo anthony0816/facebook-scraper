@@ -19,6 +19,7 @@
     "collect:edge": "node publicacion/collectUrls.mjs edge",
     "public:multi": "node publicacion/publicMulti.mjs",
     "public:multi:edge": "node publicacion/publicMulti.mjs edge",
+    "public:reset": "node publicacion/reset.mjs",
     "profile:create": "node publicacion/profile.mjs create",
     "profile:list": "node publicacion/profile.mjs list",
     "profile:checkout": "node publicacion/profile.mjs checkout",
