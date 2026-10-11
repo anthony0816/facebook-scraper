@@ -165,8 +165,8 @@ En `publicacion/public_params.mjs`:
 
 ## Notas
 
-- El script **mata el navegador** al inicio para liberar el perfil (Chrome/Edge/Firefox se cierran automáticamente).
-- Chrome 127+ no permite usar `--remote-debugging-pipe` con el `user-data-dir` por defecto. El driver copia cookies del perfil real a uno temporal para evitarlo.
+- **Edge** usa directo tu perfil real (`.../Microsoft/Edge/User Data`) — el script mata Edge al inicio para liberarlo y relanza ya logueado con tu sesión real.
+- **Chrome** no puede hacer lo mismo: Chrome 127+ bloquea adjuntar remote debugging al `user-data-dir` por defecto, y copiar cookies del perfil real a uno temporal (como se hacía antes) dejó de funcionar por el App-Bound Encryption que Chrome le agregó a las cookies. Por eso usa un perfil **propio y persistente**, separado de tu Chrome de uso diario (`.../AppData/Local/facebook-scraper-chrome-profile`) — la primera vez que corras algo con Chrome vas a tener que loguearte a Facebook a mano en la ventana que se abre; de ahí en adelante queda guardado. Como no toca tu perfil `Default`, ya no hace falta matar tu Chrome personal al arrancar.
 - El navegador queda abierto al finalizar para que puedas ver el resultado.
 - La publicación multi-grupo usa el modal nativo de Facebook ("Añadir grupos"), buscando por nombre. Soporta duplicados (nombres repetidos) y grupos únicos.
 - `collected_groups.json` es la única fuente de verdad de grupos: todo grupo se considera aprobado para publicar salvo que se le marque `"approved": false` manualmente.
