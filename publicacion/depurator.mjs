@@ -1,6 +1,6 @@
 import { ensureActiveProfilePath, getGlobalProfilePath } from './profileManager.mjs';
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
-import { join } from 'path';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from 'fs';
+import { join, relative } from 'path';
 
 const PROFILE_DEPURATION_DIR = ensureActiveProfilePath('depuration');
 const GLOBAL_DEPURATION_DIR = getGlobalProfilePath('depuration');
@@ -11,6 +11,8 @@ function depurationPaths(dir) {
     depurators: join(dir, 'depurators.json'),
     rules: join(dir, 'rules', 'rules.json'),
     statements: join(dir, 'staments', 'staments.json'),
+    rulesDir: join(dir, 'rules'),
+    statementsDir: join(dir, 'staments'),
   };
 }
 
@@ -150,18 +152,98 @@ function buildLookup(localMap, globalMap) {
   };
 }
 
+function walkJsonFiles(dir) {
+  if (!existsSync(dir)) return [];
+  const results = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      results.push(...walkJsonFiles(full));
+    } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.json')) {
+      results.push(full);
+    }
+  }
+  return results;
+}
+
+// Escanea `dir` recursivamente (cualquier cantidad de carpetas/archivos .json,
+// a cualquier profundidad) buscando objetos `{ [key]: { ... } }` en la raíz de
+// cada archivo — así rules/ y staments/ dejan de depender de un único archivo
+// con un nombre fijo. Si el MISMO nombre aparece en más de un archivo dentro de
+// este mismo árbol, es un error: no hay forma correcta de "elegir el primero"
+// para el usuario, así que se junta toda la evidencia (nombre + archivos) y se
+// devuelve para que loadResolvers() aborte con el detalle completo.
+function loadEntityMap(dir, key, label) {
+  const occurrences = new Map(); // nombre -> [{ file, value }]
+
+  for (const file of walkJsonFiles(dir)) {
+    let data;
+    try {
+      data = JSON.parse(readFileSync(file, 'utf-8'));
+    } catch {
+      console.warn(`⚠️ ${label}: ${relative(dir, file)} no es JSON válido, se ignora`);
+      continue;
+    }
+
+    const entity = data?.[key];
+    if (!entity || typeof entity !== 'object' || Array.isArray(entity)) {
+      console.warn(`⚠️ ${label}: ${relative(dir, file)} no tiene "${key}" como objeto en la raíz, se ignora`);
+      continue;
+    }
+
+    for (const name of Object.keys(entity)) {
+      if (name === '_comment') continue;
+      if (!occurrences.has(name)) occurrences.set(name, []);
+      occurrences.get(name).push({ file, value: entity[name] });
+    }
+  }
+
+  const map = {};
+  const duplicates = [];
+  for (const [name, entries] of occurrences) {
+    if (entries.length > 1) {
+      duplicates.push({ name, files: entries.map(e => relative(dir, e.file)) });
+    } else {
+      map[name] = entries[0].value;
+    }
+  }
+
+  return { map, duplicates, label };
+}
+
+function reportDuplicatesAndExit(groups) {
+  console.error(`❌ Se encontraron nombres duplicados — no se puede continuar:\n`);
+  for (const group of groups) {
+    console.error(`  En ${group.label}:`);
+    for (const dup of group.duplicates) {
+      console.error(`    "${dup.name}" aparece ${dup.files.length} veces:`);
+      dup.files.forEach(f => console.error(`      - ${f}`));
+    }
+    console.error('');
+  }
+  console.error('Arreglá los duplicados (renombrá o eliminá uno) y volvé a intentar.');
+  process.exit(1);
+}
+
 function loadResolvers() {
   const localDepurators = readJsonSafe(LOCAL.depurators)?.depurators;
   const globalDepurators = readJsonSafe(GLOBAL.depurators)?.depurators;
-  const localRules = readJsonSafe(LOCAL.rules)?.rules;
-  const globalRules = readJsonSafe(GLOBAL.rules)?.rules;
-  const localStatements = readJsonSafe(LOCAL.statements)?.statements;
-  const globalStatements = readJsonSafe(GLOBAL.statements)?.statements;
+
+  const localRules = loadEntityMap(LOCAL.rulesDir, 'rules', 'perfil activo / rules');
+  const globalRules = loadEntityMap(GLOBAL.rulesDir, 'rules', 'global / rules');
+  const localStatements = loadEntityMap(LOCAL.statementsDir, 'statements', 'perfil activo / statements');
+  const globalStatements = loadEntityMap(GLOBAL.statementsDir, 'statements', 'global / statements');
+
+  const withDuplicates = [localRules, globalRules, localStatements, globalStatements]
+    .filter(g => g.duplicates.length > 0);
+  if (withDuplicates.length > 0) {
+    reportDuplicatesAndExit(withDuplicates);
+  }
 
   return {
     lookupDepurator: buildLookup(localDepurators, globalDepurators),
-    lookupRule: buildLookup(localRules, globalRules),
-    lookupStatement: buildLookup(localStatements, globalStatements),
+    lookupRule: buildLookup(localRules.map, globalRules.map),
+    lookupStatement: buildLookup(localStatements.map, globalStatements.map),
     availableDepurators: [
       ...new Set([
         ...Object.keys(localDepurators || {}),
