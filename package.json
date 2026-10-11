@@ -26,7 +26,10 @@
     "profile:init": "node publicacion/profile.mjs init",
     "depurator:init": "node publicacion/depurator.mjs init",
     "depurator:run": "node publicacion/depurator.mjs run",
-    "depurator:reset": "node publicacion/depurator.mjs reset"
+    "depurator:reset": "node publicacion/depurator.mjs reset",
+    "profile:version:save": "node scripts/profileVersions.mjs save",
+    "profile:version:list": "node scripts/profileVersions.mjs list",
+    "profile:version:restore": "node scripts/profileVersions.mjs restore"
   },
   "keywords": [],
   "author": "",

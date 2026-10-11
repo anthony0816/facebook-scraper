@@ -115,6 +115,18 @@ Publicados: 4/6 (66.7%)
   ...
 ```
 
+### Versionado de perfiles
+
+`meta/profiles/` vive fuera de git (es data real, no código), así que no tiene historial propio. Para no perderla, `scripts/profileVersions.mjs` saca snapshots `.zip` a `meta/versions/profile_versions/` — sin dependencias nuevas, usa `Compress-Archive`/`Expand-Archive` de PowerShell.
+
+```powershell
+pnpm profile:version:save [etiqueta]    # crea un snapshot (ej: pnpm profile:version:save -- antes-de-depurar)
+pnpm profile:version:list               # lista los snapshots guardados
+pnpm profile:version:restore <índice|nombre>  # restaura meta/profiles a ese snapshot
+```
+
+`restore` siempre guarda un snapshot de seguridad del estado actual (etiquetado `pre_restore`) antes de pisarlo, así que restaurar nunca es un camino sin vuelta — si restauraste la versión equivocada, volvés a restaurar el `pre_restore` que se acaba de crear.
+
 ## Estructura del proyecto
 
 ```
@@ -133,14 +145,19 @@ facebook-scraper/
 │   ├── status.mjs         ← Comandos de estado (count, dedup)
 │   ├── profileManager.mjs ← CRUD de perfiles
 │   ├── profile.mjs        ← CLI de perfiles
-│   ├── utils.mjs          ← Utilidades compartidas (sleep, waitForElement, goto, etc.)
-│   └── profiles/          ← Datos de cada perfil
-│       ├── profiles.json  ← Registro de perfiles (activo + lista)
-│       └── <nombre>/
-│           ├── collected_groups.json  ← URLs + nombres extraídos (añadir "approved": false para excluir uno de publicar)
-│           ├── message.json           ← Texto del mensaje
-│           ├── visited.json           ← Registro de publicaciones
-│           └── imgs/                  ← Imágenes para adjuntar
+│   └── utils.mjs          ← Utilidades compartidas (sleep, waitForElement, goto, etc.)
+├── scripts/
+│   └── profileVersions.mjs ← Versionado de meta/profiles (save/list/restore)
+├── meta/
+│   ├── profiles/          ← Datos de cada perfil (fuera de git)
+│   │   ├── profiles.json  ← Registro de perfiles (activo + lista)
+│   │   └── <nombre>/
+│   │       ├── collected_groups.json  ← URLs + nombres extraídos (añadir "approved": false para excluir uno de publicar)
+│   │       ├── message.json           ← Texto del mensaje
+│   │       ├── visited.json           ← Registro de publicaciones
+│   │       └── imgs/                  ← Imágenes para adjuntar
+│   └── versions/
+│       └── profile_versions/  ← Snapshots .zip de meta/profiles (fuera de git)
 ├── index.mjs              ← Script de prueba / navegación simple
 ├── package.json
 └── README.md

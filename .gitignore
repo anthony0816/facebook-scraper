@@ -5,4 +5,5 @@ visited.json
 collected_groups.json
 /z_folder
 profiles/
+meta/versions/
 repomix-output.xml
