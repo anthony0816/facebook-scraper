@@ -6,6 +6,14 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROFILES_DIR = join(__dirname, '..', 'meta', 'profiles');
 const PROFILES_FILE = join(PROFILES_DIR, 'profiles.json');
 
+// "global" es una palabra reservada: no es un perfil real, es la carpeta de
+// fallback compartido entre perfiles (por ahora solo para depuración).
+export const RESERVED_PROFILE_NAMES = ['global'];
+
+export function getGlobalProfilePath(subpath = '') {
+  return join(PROFILES_DIR, 'global', subpath);
+}
+
 function readData() {
   if (!existsSync(PROFILES_FILE)) return null;
   return JSON.parse(readFileSync(PROFILES_FILE, 'utf-8'));
@@ -40,6 +48,11 @@ export function ensureActiveProfilePath(subpath = '') {
 export function createProfile(name) {
   if (!name || typeof name !== 'string') {
     console.error('❌ Debes especificar un nombre de perfil');
+    return false;
+  }
+
+  if (RESERVED_PROFILE_NAMES.includes(name)) {
+    console.error(`❌ "${name}" es una palabra reservada del sistema, no se puede usar como nombre de perfil`);
     return false;
   }
 

@@ -1,110 +1,178 @@
-import { ensureActiveProfilePath } from './profileManager.mjs';
+import { ensureActiveProfilePath, getGlobalProfilePath } from './profileManager.mjs';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 
 const PROFILE_DEPURATION_DIR = ensureActiveProfilePath('depuration');
-const DEPURATORS_FILE = join(PROFILE_DEPURATION_DIR, 'depurators.json');
-const RULES_FILE = join(PROFILE_DEPURATION_DIR, 'rules', 'rules.json');
-const STATEMENTS_FILE = join(PROFILE_DEPURATION_DIR, 'staments', 'staments.json');
+const GLOBAL_DEPURATION_DIR = getGlobalProfilePath('depuration');
+
+function depurationPaths(dir) {
+  return {
+    dir,
+    depurators: join(dir, 'depurators.json'),
+    rules: join(dir, 'rules', 'rules.json'),
+    statements: join(dir, 'staments', 'staments.json'),
+  };
+}
+
+const LOCAL = depurationPaths(PROFILE_DEPURATION_DIR);
+const GLOBAL = depurationPaths(GLOBAL_DEPURATION_DIR);
+
 // Agregado solo para que la función run sepa dónde está el archivo de datos
 const COLLECTED_GROUPS_FILE = join(PROFILE_DEPURATION_DIR, '../collected_groups.json');
 
 // =============================================
-// TU LÓGICA ORIGINAL (INTACTA)
+// INIT — crea la estructura de depuración (local o global)
 // =============================================
-function initDepuration() {
-  // Create directories if they don't exist
-  mkdirSync(PROFILE_DEPURATION_DIR, { recursive: true });
-  mkdirSync(join(PROFILE_DEPURATION_DIR, 'rules'), { recursive: true });
-  mkdirSync(join(PROFILE_DEPURATION_DIR, 'staments'), { recursive: true });
+const DEPURATORS_TEMPLATE = {
+  depurators: {
+    _comment: {
+      description: "Los depuradores son el nivel final de filtrado. Concatenan rules existentes mediante AND implícito. Un grupo pasa el depurador solo si TODAS sus rules evalúan a true. Se invocan desde CLI con --depurator <nombre>.",
+      structure: {
+        rules: "Array de nombres de rules existentes en rules.json. Todas deben cumplirse (AND implícito)."
+      },
+      example: {
+        "depurador_cuba_muebles": {
+          "rules": ["rule_muebles_sin_habana", "rule_palabras_prohibidas"]
+        }
+      },
+      output: "Cada grupo evaluado recibe una propiedad 'depuration.depurators.<nombre>.passed' con true/false. No se eliminan filas, solo se etiquetan."
+    }
+  }
+};
 
-  // Check if all structures already exist
-  const depuratorsExists = existsSync(DEPURATORS_FILE);
-  const rulesExists = existsSync(RULES_FILE);
-  const statementsExists = existsSync(STATEMENTS_FILE);
+const RULES_TEMPLATE = {
+  rules: {
+    _comment: {
+      description: "Las rules combinan statements mediante operadores lógicos (AND/OR). Pueden contener N statements y anidar sub-reglas para lógica compleja.",
+      structure: {
+        operator: "Operador lógico que une todos los operands. Valores: 'AND' o 'OR'.",
+        operands: "Array de elementos. Cada elemento puede ser: (1) un string con el nombre de un statement existente en statements.json, o (2) un objeto anidado con su propio operator y operands (actúa como paréntesis).",
+      },
+      example_simple: {
+        operator: "AND",
+        operands: ["has_muebles", "no_habana"]
+      },
+      example_complex: {
+        operator: "OR",
+        operands: [
+          {
+            operator: "AND",
+            operands: ["has_muebles", "no_habana"]
+          },
+          "palabra_exacta_cuba"
+        ]
+      }
+    }
+  }
+};
 
-  if (depuratorsExists && rulesExists && statementsExists) {
-    console.log('🟡 Estructura ya inicializada para el perfil activo');
-    console.log('   - depurators.json');
-    console.log('   - rules/rules.json');
-    console.log('   - staments/staments.json');
-    return;
+const STATEMENTS_TEMPLATE = {
+  statements: {
+    _comment: {
+      description: "Los statements son las unidades atómicas de evaluación. Cada statement devuelve true o false al evaluar una propiedad de un grupo.",
+      structure: {
+        target: "Propiedad del grupo a evaluar (ej: 'name', 'url'). Por defecto: 'name'.",
+        operation: "Tipo de comparación. Valores permitidos: 'includes' (contiene substring), 'excludes' (no contiene), 'whole_word' (palabra exacta con word boundaries), 'regex' (patrón regex personalizado).",
+        value: "El string o patrón a comparar contra el target."
+      },
+      example: {
+        has_muebles: {
+          target: "name",
+          operation: "includes",
+          value: "muebles"
+        }
+      }
+    }
+  }
+};
+
+// Crea cada archivo SOLO si falta (nunca pisa uno que ya existe, aunque los
+// otros dos de la misma carpeta falten) y detecta estructura corrupta sin
+// tocarla — si un archivo existe pero no es JSON válido, avisa y no lo escribe,
+// para no perder data real por un problema de formato.
+function initDepurationAt(paths, label) {
+  mkdirSync(paths.dir, { recursive: true });
+  mkdirSync(join(paths.dir, 'rules'), { recursive: true });
+  mkdirSync(join(paths.dir, 'staments'), { recursive: true });
+
+  const targets = [
+    { file: paths.depurators, template: DEPURATORS_TEMPLATE, name: 'depurators.json' },
+    { file: paths.rules, template: RULES_TEMPLATE, name: 'rules/rules.json' },
+    { file: paths.statements, template: STATEMENTS_TEMPLATE, name: 'staments/staments.json' },
+  ];
+
+  let createdAny = false;
+  for (const { file, template, name } of targets) {
+    if (!existsSync(file)) {
+      writeFileSync(file, JSON.stringify(template, null, 2), 'utf-8');
+      console.log(`✅ ${label}: creado ${name}`);
+      createdAny = true;
+      continue;
+    }
+
+    try {
+      JSON.parse(readFileSync(file, 'utf-8'));
+    } catch {
+      console.warn(`⚠️ ${label}: ${name} existe pero no es JSON válido — no se toca, revisalo a mano`);
+    }
   }
 
-  // Initialize depurators.json with full structure and comments
-  writeFileSync(DEPURATORS_FILE, JSON.stringify({
-    depurators: {
-      _comment: {
-        description: "Los depuradores son el nivel final de filtrado. Concatenan rules existentes mediante AND implícito. Un grupo pasa el depurador solo si TODAS sus rules evalúan a true. Se invocan desde CLI con --depurator <nombre>.",
-        structure: {
-          rules: "Array de nombres de rules existentes en rules.json. Todas deben cumplirse (AND implícito)."
-        },
-        example: {
-          "depurador_cuba_muebles": {
-            "rules": ["rule_muebles_sin_habana", "rule_palabras_prohibidas"]
-          }
-        },
-        output: "Cada grupo evaluado recibe una propiedad 'depuration.depurators.<nombre>.passed' con true/false. No se eliminan filas, solo se etiquetan."
-      }
-    }
-  }, null, 2), 'utf-8');
+  if (!createdAny) {
+    console.log(`🟡 ${label}: estructura ya inicializada`);
+  }
+}
 
-  // Initialize rules.json with full structure and comments
-  writeFileSync(RULES_FILE, JSON.stringify({
-    rules: {
-      _comment: {
-        description: "Las rules combinan statements mediante operadores lógicos (AND/OR). Pueden contener N statements y anidar sub-reglas para lógica compleja.",
-        structure: {
-          operator: "Operador lógico que une todos los operands. Valores: 'AND' o 'OR'.",
-          operands: "Array de elementos. Cada elemento puede ser: (1) un string con el nombre de un statement existente en statements.json, o (2) un objeto anidado con su propio operator y operands (actúa como paréntesis).",
-        },
-        example_simple: {
-          operator: "AND",
-          operands: ["has_muebles", "no_habana"]
-        },
-        example_complex: {
-          operator: "OR",
-          operands: [
-            {
-              operator: "AND",
-              operands: ["has_muebles", "no_habana"]
-            },
-            "palabra_exacta_cuba"
-          ]
-        }
-      }
-    }
-  }, null, 2), 'utf-8');
-
-  // Initialize staments.json with full structure and comments
-  writeFileSync(STATEMENTS_FILE, JSON.stringify({
-    statements: {
-      _comment: {
-        description: "Los statements son las unidades atómicas de evaluación. Cada statement devuelve true o false al evaluar una propiedad de un grupo.",
-        structure: {
-          target: "Propiedad del grupo a evaluar (ej: 'name', 'url'). Por defecto: 'name'.",
-          operation: "Tipo de comparación. Valores permitidos: 'includes' (contiene substring), 'excludes' (no contiene), 'whole_word' (palabra exacta con word boundaries), 'regex' (patrón regex personalizado).",
-          value: "El string o patrón a comparar contra el target."
-        },
-        example: {
-          has_muebles: {
-            target: "name",
-            operation: "includes",
-            value: "muebles"
-          }
-        }
-      }
-    }
-  }, null, 2), 'utf-8');
-
-  console.log('✅ Estructura de depuración inicializada para el perfil activo');
-  console.log('   - depurators.json');
-  console.log('   - rules/rules.json');
-  console.log('   - staments/staments.json');
+function initDepuration() {
+  initDepurationAt(LOCAL, 'Perfil activo');
+  initDepurationAt(GLOBAL, 'Global');
 }
 
 // =============================================
-// NUEVA LÓGICA: EVALUACIÓN
+// RESOLUCIÓN LOCAL → GLOBAL (el más específico gana)
+// =============================================
+function readJsonSafe(path) {
+  if (!existsSync(path)) return null;
+  try {
+    return JSON.parse(readFileSync(path, 'utf-8'));
+  } catch {
+    return null;
+  }
+}
+
+// Busca `name` primero en `localMap`, si no está cae a `globalMap`. Se usa
+// igual para depuradores, rules y statements — el mismo criterio de cascada
+// en los tres niveles.
+function buildLookup(localMap, globalMap) {
+  return function lookup(name) {
+    if (localMap && Object.prototype.hasOwnProperty.call(localMap, name)) return localMap[name];
+    if (globalMap && Object.prototype.hasOwnProperty.call(globalMap, name)) return globalMap[name];
+    return null;
+  };
+}
+
+function loadResolvers() {
+  const localDepurators = readJsonSafe(LOCAL.depurators)?.depurators;
+  const globalDepurators = readJsonSafe(GLOBAL.depurators)?.depurators;
+  const localRules = readJsonSafe(LOCAL.rules)?.rules;
+  const globalRules = readJsonSafe(GLOBAL.rules)?.rules;
+  const localStatements = readJsonSafe(LOCAL.statements)?.statements;
+  const globalStatements = readJsonSafe(GLOBAL.statements)?.statements;
+
+  return {
+    lookupDepurator: buildLookup(localDepurators, globalDepurators),
+    lookupRule: buildLookup(localRules, globalRules),
+    lookupStatement: buildLookup(localStatements, globalStatements),
+    availableDepurators: [
+      ...new Set([
+        ...Object.keys(localDepurators || {}),
+        ...Object.keys(globalDepurators || {}),
+      ]),
+    ].filter(k => k !== '_comment'),
+  };
+}
+
+// =============================================
+// EVALUACIÓN
 // =============================================
 function evaluateStatement(statement, group) {
   const target = statement.target || 'name';
@@ -143,15 +211,15 @@ function evaluateStatement(statement, group) {
   return values.some(compare);
 }
 
-function evaluateRuleAST(ruleObj, group, statementsData) {
+function evaluateRuleAST(ruleObj, group, lookupStatement) {
   if (!ruleObj || !ruleObj.operator || !Array.isArray(ruleObj.operands)) return false;
 
   const results = ruleObj.operands.map(operand => {
     if (typeof operand === 'string') {
-      const statement = statementsData.statements[operand];
+      const statement = lookupStatement(operand);
       return statement ? evaluateStatement(statement, group) : false;
     } else if (typeof operand === 'object') {
-      return evaluateRuleAST(operand, group, statementsData);
+      return evaluateRuleAST(operand, group, lookupStatement);
     }
     return false;
   });
@@ -160,20 +228,17 @@ function evaluateRuleAST(ruleObj, group, statementsData) {
 }
 
 // =============================================
-// NUEVA LÓGICA: EJECUCIÓN DEL DEPURADOR
+// EJECUCIÓN DEL DEPURADOR
 // =============================================
 async function depuratorRun(depuratorName) {
   try {
-    const depuratorsData = JSON.parse(readFileSync(DEPURATORS_FILE, 'utf-8'));
-    const rulesData = JSON.parse(readFileSync(RULES_FILE, 'utf-8'));
-    const statementsData = JSON.parse(readFileSync(STATEMENTS_FILE, 'utf-8'));
+    const { lookupDepurator, lookupRule, lookupStatement, availableDepurators } = loadResolvers();
     const groups = JSON.parse(readFileSync(COLLECTED_GROUPS_FILE, 'utf-8'));
 
-    const depurator = depuratorsData.depurators?.[depuratorName];
+    const depurator = lookupDepurator(depuratorName);
     if (!depurator || !Array.isArray(depurator.rules)) {
       console.error(`❌ Depurador '${depuratorName}' no encontrado o mal formado.`);
-      const available = Object.keys(depuratorsData.depurators || {}).filter(k => k !== '_comment');
-      console.log(`   Disponibles: ${available.join(', ') || 'Ninguno'}`);
+      console.log(`   Disponibles: ${availableDepurators.join(', ') || 'Ninguno'}`);
       process.exit(1);
     }
 
@@ -183,12 +248,12 @@ async function depuratorRun(depuratorName) {
     const processedGroups = groups.map(group => {
       // AND implícito: TODAS las rules del array deben pasar
       const passed = depurator.rules.every(ruleName => {
-        const ruleObj = rulesData.rules[ruleName];
+        const ruleObj = lookupRule(ruleName);
         if (!ruleObj) {
-          console.warn(`⚠️ Regla '${ruleName}' no encontrada en rules.json`);
+          console.warn(`⚠️ Regla '${ruleName}' no encontrada (ni en el perfil activo ni en global)`);
           return false;
         }
-        return evaluateRuleAST(ruleObj, group, statementsData);
+        return evaluateRuleAST(ruleObj, group, lookupStatement);
       });
 
       if (passed) passedCount++;
@@ -271,7 +336,7 @@ function resetDepurator(depuratorName) {
 
 
 // =============================================
-// NUEVO ENTRY POINT (Punto de entrada CLI)
+// ENTRY POINT (Punto de entrada CLI)
 // =============================================
 
 const RUN_USAGE = 'Uso: node depurator.mjs run <nombre_del_depurador>';
@@ -298,8 +363,7 @@ if (command === 'init') {
     printError(RESET_USAGE);
     process.exit(1);
   }
-  
-  // Llamamos a la función. No hace falta 'return', el script terminará al llegar al final.
+
   if (depuratorName === 'all') {
     resetDepurator('all');
   } else {
