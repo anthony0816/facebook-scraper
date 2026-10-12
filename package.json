@@ -5,6 +5,9 @@
   "description": "Facebook scraper usando Playwright con Chrome real",
   "type": "module",
   "main": "index.mjs",
+  "bin": {
+    "scraper": "cli.mjs"
+  },
   "scripts": {
     "start": "node index.mjs",
     "chrome": "node index.mjs chrome",

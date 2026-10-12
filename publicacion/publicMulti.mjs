@@ -368,6 +368,8 @@ async function postDynamicBatch(page, anchor, remaining, capacity) {
     const wanted = Math.min(matchCount, capacity - selectedSoFar.length);
 
     console.log(`  Buscando "${name}"...`);
+    // todo esto no funciona siempre da sin match en el modal, se omite
+    // aunque si se marque correctamente, visialmente desde la interfaz lo corroboro 
     const clicked = await selectExactMatchesInModal(page, name, wanted);
     console.log(clicked > 0 ? `    ✅ ${clicked} marcado(s)` : `    sin match en el modal, se omite`);
   }
