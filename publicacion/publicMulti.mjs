@@ -136,15 +136,65 @@ async function clickAddGroups(page) {
   });
 }
 
+// Input de búsqueda de grupos del modal "Añadir grupos".
+//
+// No alcanza con 'div[role="dialog"] input[type="search"]' por dos motivos:
+//   1. En este flujo hay más de un dialog vivo a la vez (el compositor de
+//      publicación y el de "Añadir grupos"), y page.$ devuelve el primero en
+//      orden de documento — que puede ser el del dialog equivocado.
+//   2. page.$ también devuelve elementos ocultos. Facebook deja el modal
+//      montado (solo oculto) después de cerrarlo, así que llenarlo ahí revienta
+//      con "element is not visible".
+//
+// Por eso se resuelve adentro del DOM: se filtran los dialogs realmente visibles
+// (tamaño > 0 y sin display/visibility/opacity ocultos), se recorren del último
+// al primero —el último montado es el de arriba de la pila— y dentro de cada uno
+// se busca el combobox por su semántica real ("Buscar grupos" / "Search groups",
+// que Facebook duplica en aria-label y placeholder).
+function groupSearchInput(page) {
+  return page.evaluateHandle(() => {
+    const SEL = [
+      'input[role="combobox"][type="search"]',
+      'input[type="search"][aria-label*="buscar grupos" i]',
+      'input[type="search"][aria-label*="search groups" i]',
+      'input[type="search"][placeholder*="buscar grupos" i]',
+      'input[type="search"][placeholder*="search groups" i]',
+      'input[type="search"]',
+    ].join(', ');
+
+    const isVisible = el => {
+      const rect = el.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return false;
+      const style = getComputedStyle(el);
+      return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+    };
+
+    const dialogs = [...document.querySelectorAll('div[role="dialog"]')].filter(isVisible);
+    for (const dialog of dialogs.reverse()) {
+      const input = dialog.querySelector(SEL);
+      if (input && isVisible(input)) return input;
+    }
+    return null;
+  }).then(handle => handle.asElement());
+}
+
+// El modal tarda un poco en montar el buscador después de clickear "Añadir
+// grupos", así que se reintenta con el mismo patrón de poll que el resto del
+// archivo en vez de una sola consulta.
+async function waitForGroupSearchInput(page) {
+  for (let i = 0; i < params.GROUP_SEARCH_INPUT_MAX_RETRIES; i++) {
+    const input = await groupSearchInput(page);
+    if (input) return input;
+    await sleep(params.GROUP_SEARCH_INPUT_POLL_DELAY_MS);
+  }
+  return null;
+}
+
 // Pega el texto completo de una sola vez (no tecla por tecla, para no disparar
 // un request de búsqueda por cada letra): borra de golpe con fill('') y pega el
 // nombre completo de golpe con fill(groupName).
 async function pasteSearch(page, groupName) {
-  const input = await page.$(
-    'div[role="dialog"] input[type="search"], ' +
-    'div[role="dialog"] input[placeholder*="buscar" i], ' +
-    'div[role="dialog"] input[placeholder*="search" i]'
-  );
+  const input = await waitForGroupSearchInput(page);
   if (!input) return null;
 
   await input.click();
@@ -246,11 +296,7 @@ async function selectExactMatchesInModal(
 // son exactamente" — el aria-label además trae el nombre completo sin el recorte
 // visual (line-clamp) que tiene el texto del chip en pantalla.
 async function getSelectedChipNames(page) {
-  const input = await page.$(
-    'div[role="dialog"] input[type="search"], ' +
-    'div[role="dialog"] input[placeholder*="buscar" i], ' +
-    'div[role="dialog"] input[placeholder*="search" i]'
-  );
+  const input = await groupSearchInput(page);
   if (input) {
     await input.fill('');
     await sleep(300);
@@ -338,12 +384,7 @@ async function postDynamicBatch(page, anchor, remaining, capacity) {
   }
 
   console.log(`  Esperando a que cargue el modal...`);
-  const searchInput = await waitForElement(
-    page,
-    'div[role="dialog"] input[type="search"], ' +
-    'div[role="dialog"] input[placeholder*="buscar" i], ' +
-    'div[role="dialog"] input[placeholder*="search" i]',
-  );
+  const searchInput = await waitForGroupSearchInput(page);
   if (!searchInput) {
     console.log(`  ⚠️ No se detectó el campo de búsqueda en el modal`);
     return { success: false, consumed: [] };
