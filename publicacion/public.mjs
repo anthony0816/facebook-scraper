@@ -2,7 +2,7 @@ import { getDriver } from '../drivers/index.mjs';
 import { readFileSync, existsSync } from 'fs';
 import { params } from './public_params.mjs';
 import { isVisited, markVisited, markVisitedOnError } from './groupTrace.mjs';
-import { sleep, randomBetween, parseCliArgs, waitForElement, waitForElementToDisappear, waitForHandleToDisappear, getAllImages, goto, verifyFlags, mixArray } from './utils.mjs';
+import { sleep, randomBetween, parseCliArgs, waitForElement, waitForElementToDisappear, waitForHandleToDisappear, getAllImages, goto, verifyFlags, mixArray, pasteMessage } from './utils.mjs';
 import { join } from 'path';
 import { ensureActiveProfilePath } from './profileManager.mjs';
 
@@ -128,10 +128,7 @@ const message = existsSync(MESSAGE_FILE)
   )).asElement();
 
   console.log(`  Escribiendo mensaje...`);
-  await lexicalEditor.click();
-  await sleep(1500);
-
-  await page.keyboard.type(message, { delay: 10 });
+  await pasteMessage(page, lexicalEditor, message);
 
   const textContent = await page.evaluate(() => {
     const spans = document.querySelectorAll('span[data-lexical-text="true"]');

@@ -25,6 +25,30 @@ pnpm profile:checkout <name>          # Cambia perfil activo
 pnpm profile:delete <name>            # Elimina perfil
 ```
 
+### Perfil de navegador por perfil de la app
+
+Cada perfil de la app tiene su propio perfil de navegador, **con el mismo nombre**. No hay nada que configurar: el perfil activo determina directamente con qué perfil se abre el navegador.
+
+```powershell
+pnpm profile:checkout bea_la_jicotea   # activo → el navegador abre bea_la_jicotea
+pnpm chrome                           # abre Chrome con el perfil "bea_la_jicotea"
+pnpm profile:checkout antonio_nuevo    # activo → el navegador abre antonio_nuevo
+pnpm edge                             # abre Edge con el perfil "antonio_nuevo"
+```
+
+El directorio con el nombre del perfil **lo crea el navegador solo** la primera vez. En esa primera corrida hay que **loguearse a Facebook a mano** en la ventana que se abre; después la sesión queda guardada y las siguientes arrancan ya logueadas.
+
+Dónde queda cada cosa:
+
+| | user-data-dir | perfil |
+|---|---|---|
+| **Chrome** | `.../AppData/Local/facebook-scraper-chrome-profile` (dedicado) | `<nombre del perfil de la app>/` adentro |
+| **Edge** | `.../AppData/Local/Microsoft/Edge/User Data` (el real) | `<nombre del perfil de la app>/` adentro |
+
+Los datos del perfil del navegador (cookies, sesión, historial) **no** pueden vivir en `meta/profiles/<nombre>/` — Chromium solo sabe leerlos de un user-data-dir en Windows, no de otro lado. `meta/` guarda los datos de la app (grupos, mensaje, imágenes, `visited.json`).
+
+Chrome **no puede usar tu user-data-dir real**: desde la 127 bloquea el remote debugging sobre el perfil por defecto, y sus cookies están atadas al perfil de origen (App-Bound Encryption), así que una copia no se puede desencriptar en otro lado. Por eso usa un directorio dedicado. Edge sí puede usar el real.
+
 ## Comandos
 
 ### Navegación / Test
@@ -144,6 +168,7 @@ pnpm profile:version:restore <índice|nombre>  # restaura meta/profiles a ese sn
 
 ```
 facebook-scraper/
+├── cli.mjs                ← Entry point global (`scraper <script>`), linkeado con pnpm link --global
 ├── drivers/
 │   ├── index.mjs          ← Factory/DI: resuelve el driver por nombre
 │   ├── chrome.mjs         ← Driver para Chrome
@@ -159,6 +184,7 @@ facebook-scraper/
 │   ├── reset.mjs          ← Limpia visited.json del perfil activo
 │   ├── profileManager.mjs ← CRUD de perfiles
 │   ├── profile.mjs        ← CLI de perfiles
+│   ├── browserProfile.mjs ← Resuelve el perfil del navegador (mismo nombre que el de la app)
 │   └── utils.mjs          ← Utilidades compartidas (sleep, waitForElement, goto, etc.)
 ├── scripts/
 │   └── profileVersions.mjs ← Versionado de meta/profiles (save/list/restore)

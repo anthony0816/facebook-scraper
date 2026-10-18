@@ -13,7 +13,8 @@ import {
   getAllImages,
   goto,
   mixArray,
-  verifyFlags
+  verifyFlags,
+  pasteMessage
 } from './utils.mjs';
 import { ensureActiveProfilePath } from './profileManager.mjs';
 
@@ -82,9 +83,8 @@ async function writeText(page) {
   );
   if (!editor) return null;
 
-  await editor.click();
-  await sleep(1500);
-  await page.keyboard.type(message, { delay: 10 });
+  await pasteMessage(page, editor, message);
+  await sleep(1500)
   return editor;
 }
 

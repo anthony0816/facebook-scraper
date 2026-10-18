@@ -7,6 +7,22 @@ export function sleep(ms) {
   return new Promise(r => setTimeout(r, ms));
 }
 
+// Inserta el mensaje completo en el compositor de una sola vez.
+//
+// page.keyboard.type() manda un key event POR CARÁCTER: es lento y le deja a
+// Facebook margen para disparar sus handlers en cada tecla.
+// page.keyboard.insertText() inserta el texto entero con un solo input event,
+// que es lo que se busca acá — y es la API de Playwright para hacerlo, sin
+// pasar por el clipboard del sistema ni pedir permisos de clipboard.
+export async function pasteMessage(page, editor, text) {
+  if (!text) return;
+
+  await editor.click();
+  await sleep(2300);
+  await page.keyboard.insertText(text);
+  await sleep(1300);
+}
+
 export function randomBetween(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
