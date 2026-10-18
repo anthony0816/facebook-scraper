@@ -2,11 +2,12 @@ import { getDriver } from '../drivers/index.mjs';
 import { readFileSync, existsSync } from 'fs';
 import { params } from './public_params.mjs';
 import { isVisited, markVisited, markVisitedOnError } from './groupTrace.mjs';
-import { sleep, randomBetween, parseCliArgs, waitForElement, waitForElementToDisappear, waitForHandleToDisappear, getAllImages, goto } from './utils.mjs';
+import { sleep, randomBetween, parseCliArgs, waitForElement, waitForElementToDisappear, waitForHandleToDisappear, getAllImages, goto, verifyFlags, mixArray } from './utils.mjs';
 import { join } from 'path';
 import { ensureActiveProfilePath } from './profileManager.mjs';
 
 const { flags, positional } = parseCliArgs(process.argv.slice(2));
+verifyFlags(flags,'single')
 const depuratorName = flags.depurator ?? null;
 const browserName = positional[0] || 'chrome';
 const driver = getDriver(browserName);
@@ -61,6 +62,9 @@ let targetUrls = grups_urls
 
 if (groupLimit != null) {
   targetUrls = targetUrls.slice(0, groupLimit);
+}
+if(flags['randomize'] ){
+  targetUrls =  mixArray(targetUrls)
 }
 
 const message = existsSync(MESSAGE_FILE)

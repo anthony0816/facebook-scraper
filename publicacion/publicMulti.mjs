@@ -12,10 +12,13 @@ import {
   waitForHandleToDisappear,
   getAllImages,
   goto,
+  mixArray,
+  verifyFlags
 } from './utils.mjs';
 import { ensureActiveProfilePath } from './profileManager.mjs';
 
 const { flags, positional } = parseCliArgs(process.argv.slice(2));
+verifyFlags(flags,'multi')
 const depuratorName = flags.depurator ?? null;
 const browserName = positional[0] || 'chrome';
 const driver = getDriver(browserName);
@@ -462,7 +465,10 @@ async function main() {
     alreadyPublished.forEach(g => console.log(`  ${g.name} - ${g.url}`));
   }
 
-  const remaining = [...pending];
+  let remaining = [...pending];
+
+  if (flags['randomize']) remaining = mixArray(remaining)
+  
   const capacity = Math.max(params.BATCH_SIZE - 1, 0);
 
   console.log(`\n[2/3] ${remaining.length} pendientes | hasta ${capacity} grupo(s) adicionale(s) por publicación${batchLimit != null ? ` | límite: ${batchLimit} batch(es)` : ''}`);

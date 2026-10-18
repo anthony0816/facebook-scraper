@@ -1,6 +1,7 @@
 import { readdirSync } from 'fs';
 import { join } from 'path';
 import { params } from './public_params.mjs';
+import {flags as existing_flags}  from '../consts/flags.mjs'
 
 export function sleep(ms) {
   return new Promise(r => setTimeout(r, ms));
@@ -51,11 +52,16 @@ export async function waitForHandleToDisappear(handle, maxRetries = params.MAX_T
 export function parseCliArgs(argv) {
   const flags = {};
   const positional = [];
-
+  const FLAGS_DEFAULT_TRUE = existing_flags.filter(ex_flag => ex_flag.required_argument == false)
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg.startsWith('-')) {
       const key = arg.replace(/^--?/, '');
+      const coincidences = FLAGS_DEFAULT_TRUE.filter(flag => key == flag.name)
+      if (coincidences.length > 0){
+        flags[key] = coincidences[0].default
+        continue
+      }
       flags[key] = argv[i + 1];
       i++;
     } else {
@@ -64,6 +70,19 @@ export function parseCliArgs(argv) {
   }
 
   return { flags, positional };
+}
+
+export function verifyFlags(flags, method){
+  if (!method) throw new Error('no methon provided in verify flag')
+  const ALLOWED_FLAGS_SLINGE = existing_flags.filter(flag => flag.exe_envs.some(env => env == 'single'))
+  const ALLOWED_FLAGS_MULTI =  existing_flags.filter(flag => flag.exe_envs.some(env => env == 'multi'))
+  let  target = null
+  if (method ==  'multi') target =  ALLOWED_FLAGS_MULTI
+  if (method == 'single') target = ALLOWED_FLAGS_SLINGE
+  if (!target)  throw new Error ('no valid method provided in verify flag')
+  Object.keys(flags).forEach(f => {
+    if (!target.some(allowed => f == allowed.name )) throw new Error('Not allowed flag ' + f)
+  })
 }
 
 export function getAllImages(dir) {
@@ -121,4 +140,16 @@ export async function waitForSearchResults(page, searchText, maxRetries = params
     await sleep(delay);
   }
   return false;
+}
+
+export function mixArray(array){
+  const result =  [...array]
+  for (let i = result.length - 1 ; i > 0 ; i --){
+    const j = Math.floor(Math.random() * (i + 1))
+    const result_i = result[i]
+    const result_j = result[j]
+    result[i] = result_j
+    result[j] = result_i
+  }
+  return result
 }
