@@ -2,6 +2,8 @@ import { getDriver } from '../drivers/index.mjs';
 import { writeFileSync } from 'fs';
 import { join } from 'path';
 import { ensureActiveProfilePath } from './profileManager.mjs';
+import {goto} from './utils.mjs'
+import { params } from './public_params.mjs';
 
 const browserName = process.argv[2] || 'chrome';
 const driver = getDriver(browserName);
@@ -63,7 +65,7 @@ async function main() {
 
   console.log('[2/4] Navegando a grupos...');
   const page = await context.newPage();
-  await page.goto('https://www.facebook.com/groups/feed/#', { waitUntil: 'load', timeout: 60000 });
+  await goto(page,'https://www.facebook.com/groups/feed/#',params.MAX_NAVEGATION_RETRIES);
   await sleep(5000);
 
   console.log('[3/4] Haciendo scroll infinito...');
