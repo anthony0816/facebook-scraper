@@ -1,6 +1,8 @@
 import { ensureActiveProfilePath, getGlobalProfilePath } from './profileManager.mjs';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from 'fs';
 import { join, relative } from 'path';
+import { fileURLToPath } from 'url';
+
 
 const PROFILE_DEPURATION_DIR = ensureActiveProfilePath('depuration');
 const GLOBAL_DEPURATION_DIR = getGlobalProfilePath('depuration');
@@ -21,6 +23,7 @@ const GLOBAL = depurationPaths(GLOBAL_DEPURATION_DIR);
 
 // Agregado solo para que la función run sepa dónde está el archivo de datos
 const COLLECTED_GROUPS_FILE = join(PROFILE_DEPURATION_DIR, '../collected_groups.json');
+let resolvers = {}
 
 // =============================================
 // INIT — crea la estructura de depuración (local o global)
@@ -314,7 +317,10 @@ function evaluateRuleAST(ruleObj, group, lookupStatement) {
 // =============================================
 async function depuratorRun(depuratorName) {
   try {
-    const { lookupDepurator, lookupRule, lookupStatement, availableDepurators } = loadResolvers();
+
+    if (!resolvers || Object.keys(resolvers).length == 0) resolvers = loadResolvers()
+
+    const { lookupDepurator, lookupRule, lookupStatement, availableDepurators } = resolvers
     const groups = JSON.parse(readFileSync(COLLECTED_GROUPS_FILE, 'utf-8'));
 
     const depurator = lookupDepurator(depuratorName);
@@ -416,6 +422,19 @@ function resetDepurator(depuratorName) {
   }
 }
 
+export function getDepurator(depuratorName){
+  if (!resolvers || Object.keys(resolvers).length == 0) resolvers = loadResolvers()
+
+  const {lookupDepurator} = resolvers
+
+  const depurator = lookupDepurator(depuratorName);
+    if (!depurator || !Array.isArray(depurator.rules)) {
+    return null
+    }
+    return depurator 
+}
+
+
 
 // =============================================
 // ENTRY POINT (Punto de entrada CLI)
@@ -429,32 +448,37 @@ function printError(usageMessage) {
   console.log(usageMessage);
 }
 
-const command = process.argv[2];
-const depuratorName = process.argv[3];
+const __filename = fileURLToPath(import.meta.url);
+const isMain = process.argv[1] === __filename;
+if (isMain){
 
-if (command === 'init') {
-  initDepuration();
-} else if (command === 'run') {
-  if (!depuratorName) {
-    printError(RUN_USAGE);
-    process.exit(1);
-  }
-  depuratorRun(depuratorName);
-} else if (command === 'reset') {
-  if (!depuratorName) {
-    printError(RESET_USAGE);
-    process.exit(1);
-  }
-
-  if (depuratorName === 'all') {
-    resetDepurator('all');
+  const command = process.argv[2];
+  const depuratorName = process.argv[3];
+  
+  if (command === 'init') {
+    initDepuration();
+  } else if (command === 'run') {
+    if (!depuratorName) {
+      printError(RUN_USAGE);
+      process.exit(1);
+    }
+    depuratorRun(depuratorName);
+  } else if (command === 'reset') {
+    if (!depuratorName) {
+      printError(RESET_USAGE);
+      process.exit(1);
+    }
+  
+    if (depuratorName === 'all') {
+      resetDepurator('all');
+    } else {
+      resetDepurator(depuratorName);
+    }
   } else {
-    resetDepurator(depuratorName);
+    console.log('Uso:');
+    console.log('  node depurator.mjs init');
+    console.log('  node depurator.mjs run <nombre_del_depurador>');
+    console.log('  node depurator.mjs reset <nombre_del_depurador> | all');
+    process.exit(1);
   }
-} else {
-  console.log('Uso:');
-  console.log('  node depurator.mjs init');
-  console.log('  node depurator.mjs run <nombre_del_depurador>');
-  console.log('  node depurator.mjs reset <nombre_del_depurador> | all');
-  process.exit(1);
 }

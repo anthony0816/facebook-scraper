@@ -15,9 +15,11 @@ import {
   mixArray,
   verifyFlags,
   pasteMessage,
-  waitForCondition
+  waitForCondition,
+  actionNoDepurator
 } from './utils.mjs';
 import { ensureActiveProfilePath } from './profileManager.mjs';
+import {getDepurator} from './depurator.mjs'
 
 const { flags, positional } = parseCliArgs(process.argv.slice(2));
 verifyFlags(flags,'multi')
@@ -52,6 +54,8 @@ const message = existsSync(MESSAGE_FILE)
 
 if (depuratorName) {
   console.log(`🔍 Filtrando por depurador "${depuratorName}" (solo passed === true, sin recomputar)`);
+  const depurator =  getDepurator(depuratorName)
+  if (!depurator) actionNoDepurator(depuratorName)
 }
 
 const pending = allGroups.filter(g =>

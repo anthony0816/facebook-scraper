@@ -170,8 +170,8 @@ export async function waitForSearchResults(page, searchText, maxRetries = params
   }
   return false;
 }
-
 export function mixArray(array){
+
   const result =  [...array]
   for (let i = result.length - 1 ; i > 0 ; i --){
     const j = Math.floor(Math.random() * (i + 1))
@@ -181,4 +181,9 @@ export function mixArray(array){
     result[j] = result_i
   }
   return result
+}
+
+export function actionNoDepurator(name){
+  console.error(`el depurador ${name} no existe`)
+  process.exit(1)
 }

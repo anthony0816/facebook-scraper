@@ -2,9 +2,10 @@ import { getDriver } from '../drivers/index.mjs';
 import { readFileSync, existsSync } from 'fs';
 import { params } from './public_params.mjs';
 import { isVisited, markVisited, markVisitedOnError } from './groupTrace.mjs';
-import { sleep, randomBetween, parseCliArgs, waitForElement, waitForElementToDisappear, waitForHandleToDisappear, getAllImages, goto, verifyFlags, mixArray, pasteMessage } from './utils.mjs';
+import { sleep, randomBetween, parseCliArgs, waitForElement, waitForElementToDisappear, waitForHandleToDisappear, getAllImages, goto, verifyFlags, mixArray, pasteMessage, actionNoDepurator } from './utils.mjs';
 import { join } from 'path';
 import { ensureActiveProfilePath } from './profileManager.mjs';
+import {getDepurator} from './depurator.mjs'
 
 const { flags, positional } = parseCliArgs(process.argv.slice(2));
 verifyFlags(flags,'single')
@@ -37,6 +38,8 @@ const grups_urls = collectedGroups
 
 if (depuratorName) {
   console.log(`🔍 Filtrando por depurador "${depuratorName}" (solo passed === true, sin recomputar)`);
+  const depurator =  getDepurator(depuratorName)
+  if (!depurator) actionNoDepurator(depuratorName)
 }
 
 // Mismo criterio de "ya manejado" que antes: sin error se da por publicado, y el
