@@ -36,6 +36,19 @@ export async function waitForElement(page, selector, maxRetries = params.MAX_TEX
   return waitForElement(page, selector, maxRetries - 1, delay);
 }
 
+// Misma mecánica que waitForElement (reintentos con espera), pero para
+// condiciones que no son un selector CSS: se consulta una función que devuelve
+// true/false y recibe la page. Sirve para botones que hay que localizar
+// recorriendo el DOM (ej. "Añadir grupos", cuyo texto vive en un span dentro de
+// varios divs), donde no alcanza con page.$.
+export async function waitForCondition(page, fn, maxRetries = params.MAX_TEXT_EDITOR_FINDER_SECONDS_AWAIT, delay = 1000) {
+  console.log('awaiting for condition ' + maxRetries);
+  if (await fn(page)) return true;
+  if (maxRetries <= 0) return false;
+  await sleep(delay);
+  return waitForCondition(page, fn, maxRetries - 1, delay);
+}
+
 export async function waitForElementToDisappear(page, selector, maxRetries = params.MAX_TEXT_EDITOR_FINDER_SECONDS_AWAIT, delay = 1000) {
   console.log('awaiting for the element to disappear ' + maxRetries);
   const el = await page.$(selector);

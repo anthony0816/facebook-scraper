@@ -14,7 +14,8 @@ import {
   goto,
   mixArray,
   verifyFlags,
-  pasteMessage
+  pasteMessage,
+  waitForCondition
 } from './utils.mjs';
 import { ensureActiveProfilePath } from './profileManager.mjs';
 
@@ -116,26 +117,42 @@ async function uploadImages(page) {
   return false;
 }
 
-async function clickAddGroups(page) {
-  return page.evaluate(() => {
-    const spans = document.querySelectorAll('span');
-    for (const span of spans) {
+// Busca (sin clickear) el botón "Añadir grupos" y devuelve el elemento, o null
+// si todavía no está en el DOM. El texto del botón vive en un span propio y el
+// clickeable real es un ancestro con role="button" (o un <a>), así que se sube
+// por los padres. Se filtra por visibilidad porque ahora el click lo hace
+// Playwright, que exige un elemento visible: Facebook deja copias ocultas de los
+// modales montadas, y devolver una de esas haría fallar el click.
+function getAddGroups(page) {
+  return page.evaluateHandle(() => {
+    const LABELS =  ['Añadir grupos','Add groups', 'Agregar grupos']
+    const isVisible = el => {
+      const rect = el.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return false;
+      const style = getComputedStyle(el);
+      return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+    };
+
+    for (const span of document.querySelectorAll('span')) {
       const text = span.textContent.trim();
-      if (text === 'Añadir grupos' || text === 'Add groups') {
-        let p = span.parentElement;
-        for (let i = 0; i < 8; i++) {
-          if (!p) break;
-          if (p.getAttribute('role') === 'button' || p.tagName === 'A') {
-            p.click();
-            return true;
-          }
-          p = p.parentElement;
-        }
-        span.click();
-        return true;
+      if (!LABELS.some(label => text == label)) continue;
+      if (!isVisible(span)) continue;
+
+      let el = span;
+      for (let i = 0; i < 8; i++) {
+        if (!el) break;
+        if (el.getAttribute('role') === 'button' || el.tagName === 'A') return el;
+        el = el.parentElement;
       }
+      return span;
     }
-    return false;
+    return null;
+  }).then(async handle => {
+    const el = handle.asElement();
+    // Cada poll fallido crea un handle nulo; se libera para no acumular basura
+    // durante la espera.
+    if (!el) await handle.dispose();
+    return el;
   });
 }
 
@@ -381,10 +398,25 @@ async function postDynamicBatch(page, anchor, remaining, capacity) {
   await uploadImages(page);
 
   console.log(`  Abriendo "Añadir grupos"...`);
-  if (!await clickAddGroups(page)) {
+  let addGroupsElement = null;
+  const addGroupsFound = await waitForCondition(
+    page,
+    async () => {
+      const el = await getAddGroups(page);
+      if (!el) return false;
+      addGroupsElement = el;
+      return true;
+    },
+    params.ADD_GROUPS_BUTTON_MAX_RETRIES,
+    params.ADD_GROUPS_BUTTON_POLL_DELAY_MS,
+  );
+
+  if (!addGroupsFound) {
     console.log(`  ❌ No se encontró botón "Añadir grupos"`);
     return { success: false, consumed: [] };
   }
+
+  await addGroupsElement.click();
 
   console.log(`  Esperando a que cargue el modal...`);
   const searchInput = await waitForGroupSearchInput(page);

@@ -13,6 +13,14 @@ export const params = {
   GROUP_SEARCH_INPUT_MAX_RETRIES: 15,
   GROUP_SEARCH_INPUT_POLL_DELAY_MS: 500,
 
+  // El botón de abrir el compositor y el de "Añadir grupos" no están en el DOM
+  // en el instante en que se navega al grupo: los monta React un momento
+  // después. Antes se chequeaban una sola vez y fallaban en páginas lentas.
+  COMPOSER_BUTTON_MAX_RETRIES: 20,
+  COMPOSER_BUTTON_POLL_DELAY_MS: 500,
+  ADD_GROUPS_BUTTON_MAX_RETRIES: 20,
+  ADD_GROUPS_BUTTON_POLL_DELAY_MS: 500,
+
   BATCH_SIZE: 10,
   REST_BETWEEN_BATCHES: 10_000,
 };
